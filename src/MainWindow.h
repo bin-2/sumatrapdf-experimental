@@ -159,6 +159,12 @@ struct MainWindow {
     // horizontal splitter for resizing favorites and bookmars parts
     Splitter* favSplitter = nullptr;
 
+    // vertical splitter for resizing right annotation panel
+    Splitter* editAnnotsSplitter = nullptr;
+
+    // annotation panel width in DPI-independent pixels
+    int editAnnotsDx = 0;
+
     TabsCtrl* tabsCtrl = nullptr;
     bool tabsVisible = false;
     bool tabsInTitlebar = false;
@@ -245,6 +251,8 @@ struct MainWindow {
         bool tocVisible = false;
         bool showFavorites = false;
         bool showMenuBarRebar = false;
+        bool editAnnotsVisible = false;
+        int editAnnotsDx = 0;
     };
     LayoutState lastLayoutState;
 
@@ -319,6 +327,9 @@ struct MainWindow {
     void DeleteToolTip() const;
 
     bool CreateUIAProvider();
+
+    // AnnotationPanel
+    bool editAnnotsVisible = false;
 };
 
 bool HasOpenedDocuments(MainWindow*);

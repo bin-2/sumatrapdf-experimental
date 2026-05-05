@@ -71,9 +71,12 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::None, PageInfoId, nullptr}, // text box for page number + show current page / no of pages
     {TbIcon::PagePrev, CmdGoToPrevPage, _TRN("Previous Page")},
     {TbIcon::PageNext, CmdGoToNextPage, _TRN("Next Page")},
+    {TbIcon::Save, CmdSaveAnnotations, _TRN("Save Annotations")},
+    {TbIcon::AnnotEdit, CmdEditAnnotations, _TRN("Edit Annotations")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::LayoutContinuous, CmdZoomFitWidthAndContinuous, _TRN("Fit Width and Show Pages Continuously")},
     {TbIcon::LayoutSinglePage, CmdZoomFitPageAndSinglePage, _TRN("Fit a Single Page")},
+    {TbIcon::Book, CmdFacingView, _TRN("Facing View")},
     {TbIcon::RotateLeft, CmdRotateLeft, _TRN("Rotate &Left")},
     {TbIcon::RotateRight, CmdRotateRight, _TRN("Rotate &Right")},
     {TbIcon::ZoomOut, CmdZoomOut, _TRN("Zoom Out")},
@@ -167,6 +170,10 @@ static bool NeedsRotateUI(MainWindow* win) {
 // we remove toolbar buttons for un-availalbe commands
 static bool IsCmdAvailable(MainWindow* win, int cmdId) {
     switch (cmdId) {
+        case CmdSaveAnnotations:
+        case CmdEditAnnotations:
+            return true;
+
         case CmdZoomFitWidthAndContinuous:
         case CmdZoomFitPageAndSinglePage:
             return !win->AsChm();
@@ -319,6 +326,28 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow* win) {
 #endif
 }
 
+// Toolbar: UnsavedAnnotations STATE CHANGE
+static bool HasUnsavedAnnotations(MainWindow* win) {
+    if (!win) {
+        return false;
+    }
+
+    WindowTab* tab = win->CurrentTab();
+    if (!tab || !tab->AsFixed()) {
+        return false;
+    }
+
+    return EngineHasUnsavedAnnotations(tab->AsFixed()->GetEngine());
+}
+static void SetToolbarButtonImageByIdx(HWND hwnd, int idx, TbIcon icon) {
+    TBBUTTONINFOW bi{};
+    bi.cbSize = sizeof(bi);
+    bi.dwMask = TBIF_BYINDEX | TBIF_IMAGE;
+    bi.iImage = (int)icon;
+    SendMessageW(hwnd, TB_SETBUTTONINFOW, idx, (LPARAM)&bi);
+}
+
+
 // TODO: this is called too often
 // TODO: also set checked state instead of calling SetToolbarButtonCheckedState() all over
 void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
@@ -336,6 +365,11 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
         }
         bool isEnabled = IsCmdEnabled(win, cmdId);
         UpdateToolbarButtonStateByIdx(hwnd, i, isEnabled, TBSTATE_ENABLED);
+
+        if (cmdId == CmdSaveAnnotations) {
+            bool dirty = HasUnsavedAnnotations(win);
+            SetToolbarButtonImageByIdx(hwnd, i, dirty ? TbIcon::SaveDirty : TbIcon::Save);
+        }
     }
 
     // Find labels may have to be repositioned if some

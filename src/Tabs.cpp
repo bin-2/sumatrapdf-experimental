@@ -32,9 +32,12 @@
 #include "TableOfContents.h"
 #include "Tabs.h"
 #include "SumatraDialogs.h"
+#include "EditAnnotations.h"
+
 #include "FileHistory.h"
 #include "Theme.h"
 #include "Translations.h"
+
 
 #include "utils/Log.h"
 
@@ -142,6 +145,8 @@ void RemoveTab(WindowTab* tab) {
     if (tab && tab->type != WindowTab::Type::None) {
         LoadModelIntoTab(tab);
     }
+
+    UpdateDockedEditAnnotationsVisibility(win);
 #endif
 }
 
@@ -234,8 +239,12 @@ void TabsSelect(MainWindow* win, int tabIndex) {
     if (prevIdx < 0) {
         return;
     }
+
     WindowTab* tab = tabs[tabIndex];
     LoadModelIntoTab(tab);
+
+    UpdateDockedEditAnnotationsVisibility(win);
+
     if (isShowingPageInfo) {
         PostMessageW(win->hwndFrame, WM_COMMAND, CmdTogglePageInfo, 0);
     }
@@ -482,13 +491,19 @@ static void MainWindowTabSelectionChanging(MainWindow* win, TabsCtrl::SelectionC
 
 static void MainWindowTabSelectionChanged(MainWindow* win, TabsCtrl::SelectionChangedEvent* ev) {
     bool isShowingPageInfo = (GetNotificationForGroup(win->hwndCanvas, kNotifPageInfo) != nullptr);
+
     int currentIdx = win->tabsCtrl->GetSelected();
     WindowTab* tab = win->Tabs()[currentIdx];
+
     LoadModelIntoTab(tab);
+
+    UpdateDockedEditAnnotationsVisibility(win);
+
     if (isShowingPageInfo) {
         PostMessageW(win->hwndFrame, WM_COMMAND, CmdTogglePageInfo, 0);
     }
 }
+
 
 static void MainWindowTabMigration(MainWindow* win, TabsCtrl::MigrationEvent* ev) {
     WindowTab* tab = win->GetTab(ev->tabIdx);

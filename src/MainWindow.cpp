@@ -169,6 +169,9 @@ MainWindow::~MainWindow() {
     delete favSplitter;
     delete tocLabelWithClose;
     delete favLabelWithClose;
+
+    delete editAnnotsSplitter;
+    editAnnotsSplitter = nullptr;
 }
 
 void ClearMouseState(MainWindow* win) {
@@ -731,6 +734,10 @@ void UpdateControlsColors(MainWindow* win) {
         favTreeView->SetColors(txtCol, bgCol);
         win->favLabelWithClose->SetColors(txtCol, bgCol);
         win->favSplitter->SetColors(kColorNoChange, splitterCol);
+    }
+
+    if (win->editAnnotsSplitter) {
+        win->editAnnotsSplitter->SetColors(kColorNoChange, splitterCol);
     }
 }
 

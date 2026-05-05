@@ -15,3 +15,11 @@ void DeleteAnnotationAndUpdateUI(WindowTab*, Annotation*);
 void SetSelectedAnnotation(WindowTab*, Annotation*, bool isNew = false, EditAnnotFocus focus = EditAnnotFocus::Default);
 void UpdateAnnotationsList(EditAnnotationsWindow*);
 void NotifyAnnotationsChanged(EditAnnotationsWindow*);
+
+bool IsEditAnnotationsDockedAndVisible(WindowTab* tab);
+bool HasDockedEditAnnotationsWindow(WindowTab* tab);
+HWND GetEditAnnotationsHwnd(WindowTab* tab);
+void UpdateDockedEditAnnotationsVisibility(MainWindow* win);
+void UpdateEditAnnotationsThemeForWindow(MainWindow* win);
+void ToggleDockEditAnnotationsWindow(WindowTab* tab);
+bool CloseAndDeleteEditAnnotationsWindow(WindowTab* tab);

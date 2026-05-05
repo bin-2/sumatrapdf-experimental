@@ -1737,6 +1737,37 @@ void ReloadDocument(MainWindow* win, bool autoRefresh) {
     DeleteFileState(fs);
 }
 
+static void OnEditAnnotsSplitterMove(Splitter::MoveEvent* ev) {
+    Splitter* splitter = ev->w;
+    HWND hwnd = splitter->hwnd;
+    MainWindow* win = FindMainWindowByHwnd(hwnd);
+    if (!win) {
+        ev->resizeAllowed = false;
+        return;
+    }
+
+    Rect rFrame = ClientRect(win->hwndFrame);
+    Point pcur = HwndGetCursorPos(win->hwndFrame);
+
+    int splitterDx = DpiScale(win->hwndFrame, 4);
+
+    int minDx = DpiScale(win->hwndFrame, 260);
+    int maxDx = DpiScale(win->hwndFrame, 700);
+
+    // Right dock: panel width is distance from cursor to right edge.
+    int newDx = rFrame.dx - pcur.x - splitterDx;
+
+    if (newDx < minDx || newDx > maxDx) {
+        ev->resizeAllowed = false;
+        return;
+    }
+
+    win->editAnnotsDx = newDx;
+
+    win->lastLayoutState = {};
+    RelayoutWindow(win);
+}
+
 static void CreateSidebar(MainWindow* win) {
     {
         Splitter::CreateArgs args;
@@ -1756,6 +1787,18 @@ static void CreateSidebar(MainWindow* win) {
         win->favSplitter = new Splitter();
         win->favSplitter->onMove = MkFunc1Void(OnFavSplitterMove);
         win->favSplitter->Create(args);
+    }
+
+    {
+        Splitter::CreateArgs args;
+        args.parent = win->hwndFrame;
+        args.type = SplitterType::Vert;
+        args.backgroundColor = ThemeControlBackgroundColor();
+
+        win->editAnnotsSplitter = new Splitter();
+        win->editAnnotsSplitter->onMove = MkFunc1Void(OnEditAnnotsSplitterMove);
+        win->editAnnotsSplitter->Create(args);
+        win->editAnnotsSplitter->SetColors(kColorNoChange, ThemeControlBackgroundColor());
     }
 
     CreateFavorites(win);
@@ -2037,6 +2080,11 @@ void UpdateAfterThemeChange() {
         win->brControlBgColor = CreateSolidBrush(ThemeControlBackgroundColor());
 
         UpdateControlsColors(win);
+
+        if (win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+            RedrawWindow(win->editAnnotsSplitter->hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+
         RebuildMenuBarForWindow(win);
         // TODO: probably leaking toolbar image list
         UpdateToolbarAfterThemeChange(win);
@@ -2047,6 +2095,9 @@ void UpdateAfterThemeChange() {
             DarkMode::setWindowMenuBarSubclass(win->hwndFrame);
             // DarkMode::setDarkTooltips(win->infotip->hwnd, (int)DarkMode::ToolTipsType::tooltip);
         }
+
+        UpdateEditAnnotationsThemeForWindow(win);
+
         UpdateWindowFrameBorderColor(win);
         // TODO: this only rerenders canvas, not frame, even with
         // includingNonClientArea == true.
@@ -2055,6 +2106,7 @@ void UpdateAfterThemeChange() {
         RedrawWindow(win->hwndFrame, nullptr, nullptr, flags);
     }
     UpdateDocumentColors();
+
 }
 
 static void RenameFileInHistory(const char* oldPath, const char* newPath) {
@@ -2325,6 +2377,7 @@ static MainWindow* MaybeCreateWindowForFileLoad(LoadArgs* args) {
     }
     return win;
 }
+
 
 struct LoadDocumentAsyncData {
     NotificationWnd* wndNotif = nullptr;
@@ -4197,8 +4250,10 @@ static bool IsLayoutStateEq(LayoutState* s1, LayoutState* s2) {
     return s1->rc == s2->rc && s1->presentation == s2->presentation && s1->tabsInTitlebar == s2->tabsInTitlebar &&
            s1->isFullScreen == s2->isFullScreen && s1->tabsVisible == s2->tabsVisible &&
            s1->isToolbarVisible == s2->isToolbarVisible && s1->tocVisible == s2->tocVisible &&
-           s1->showFavorites == s2->showFavorites && s1->showMenuBarRebar == s2->showMenuBarRebar;
+           s1->showFavorites == s2->showFavorites && s1->showMenuBarRebar == s2->showMenuBarRebar &&
+           s1->editAnnotsVisible == s2->editAnnotsVisible && s1->editAnnotsDx == s2->editAnnotsDx;
 }
+
 
 static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     Rect rc = ClientRect(win->hwndFrame);
@@ -4217,6 +4272,10 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.tocVisible = win->tocVisible;
     curState.showFavorites = gGlobalPrefs->showFavorites;
     curState.showMenuBarRebar = IsShowingMenuBarRebar(win);
+
+    curState.editAnnotsVisible =
+        HasDockedEditAnnotationsWindow(win->CurrentTab()) && !win->presentation && !win->isFullScreen;
+    curState.editAnnotsDx = win->editAnnotsDx;
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsLayoutStateEq(&curState, &win->lastLayoutState) && updateToolbars && sidebarDx == -1) {
@@ -4381,13 +4440,63 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         rc.dx -= toc.dx + kSplitterDx;
     }
 
+    WindowTab* currTab = win->CurrentTab();
+    HWND hwndAnnots = GetEditAnnotationsHwnd(currTab);
+
+    bool showAnnots = hwndAnnots && HasDockedEditAnnotationsWindow(currTab) && !win->presentation && !win->isFullScreen;
+
+    if (hwndAnnots) {
+        HwndSetVisibility(hwndAnnots, showAnnots);
+    }
+
+    if (win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+        HwndSetVisibility(win->editAnnotsSplitter->hwnd, showAnnots);
+    }
+
+    if (showAnnots) {
+        int splitterDx = DpiScale(win->hwndFrame, 4);
+
+        int minPanelDx = DpiScale(win->hwndFrame, 260);
+        int maxPanelDx = rc.dx / 2;
+        if (maxPanelDx < minPanelDx) {
+            maxPanelDx = minPanelDx;
+        }
+
+        int panelDx = DpiScale(win->hwndFrame, win->editAnnotsDx);
+        panelDx = limitValue(panelDx, minPanelDx, maxPanelDx);
+
+        Rect rAnnots(rc.x + rc.dx - panelDx, rc.y, panelDx, rc.dy);
+        Rect rSplitter(rAnnots.x - splitterDx, rc.y, splitterDx, rc.dy);
+
+        if (win->editAnnotsSplitter) {
+            dh.MoveWindow(win->editAnnotsSplitter->hwnd, rSplitter);
+        }
+
+        dh.MoveWindow(hwndAnnots, rAnnots);
+
+        rc.dx -= panelDx + splitterDx;
+    }
+
     dh.MoveWindow(win->hwndCanvas, rc);
 
     dh.End();
 
     if (suppressIntermediateRedraws) {
-        // re-enable redraw and invalidate once
+        // re-enable redraw before forcing child repaints
         SendMessageW(win->hwndFrame, WM_SETREDRAW, TRUE, 0);
+    }
+
+    if (showAnnots && win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+        RedrawWindow(win->editAnnotsSplitter->hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
+    }
+
+    if (showAnnots) {
+        SetWindowPos(hwndAnnots, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+        RedrawWindow(hwndAnnots, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    }
+
+    if (suppressIntermediateRedraws) {
         // RDW_ALLCHILDREN ensures notification windows (children of canvas) also repaint
         RedrawWindow(win->hwndCanvas, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
         RedrawWindow(win->hwndFrame, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME);
@@ -4403,6 +4512,9 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     }
     if (tocVisible && favVisible) {
         InvalidateRect(win->favSplitter->hwnd, nullptr, TRUE);
+    }
+    if (showAnnots && win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+        InvalidateRect(win->editAnnotsSplitter->hwnd, nullptr, TRUE);
     }
     if (updateToolbars && win->isToolbarVisible) {
         RedrawWindow(win->hwndReBar, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
@@ -7408,19 +7520,42 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdEditAnnotations: {
-            if (!tab) return 0;
+            if (!tab) {
+                return 0;
+            }
+
+            bool fromContextMenu = false;
+
+            if (lp != 0) {
+                HWND hwndSrc = (HWND)lp;
+
+                // Context menu sends mouse coordinates packed into LPARAM, not an HWND.
+                // Toolbar/menu accelerators usually pass 0 or a real HWND.
+                if (!IsWindow(hwndSrc)) {
+                    fromContextMenu = true;
+                }
+            }
+
+            if (tab->editAnnotsWindow && !fromContextMenu) {
+                CloseAndDeleteEditAnnotationsWindow(tab);
+                return 0;
+            }
+
             Annotation* annot = nullptr;
             Point pt = HwndGetCursorPos(win->hwndCanvas);
-            if (lp != 0) {
+
+            if (fromContextMenu) {
                 // when sending from Menu.cpp mouse position is encoded as LPARAM
                 pt.x = GET_X_LPARAM(lp);
                 pt.y = GET_Y_LPARAM(lp);
                 // MapWindowPoints(win->hwndCanvas, HWND_DESKTOP, &pt, 1);
             }
+
             int pageNoUnderCursor = dm->GetPageNoByPoint(pt);
             if (pageNoUnderCursor > 0) {
                 annot = dm->GetAnnotationAtPos(pt, nullptr);
             }
+
             ShowEditAnnotationsWindow(tab, annot);
             return 0;
         }

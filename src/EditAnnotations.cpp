@@ -100,6 +100,8 @@ struct EditAnnotationsWindow : Wnd {
     WindowTab* tab = nullptr;
     LayoutBase* mainLayout = nullptr;
 
+    bool isDocked = false;
+
     ListBox* listBox = nullptr;
     Static* staticRect = nullptr;
     Static* staticAuthor = nullptr;
@@ -157,6 +159,10 @@ struct EditAnnotationsWindow : Wnd {
     bool PreTranslateMessage(MSG&) override;
 
     void ListBoxSelectionChanged();
+
+    Static* staticTitle = nullptr;
+    Button* buttonClose = nullptr;
+    Button* buttonDockToggle = nullptr;
 
     ~EditAnnotationsWindow() override;
 };
@@ -297,25 +303,121 @@ static bool IsAnnotationTypeInArray(AnnotationType* arr, size_t arrSize, Annotat
     return false;
 }
 
+static void ButtonDockToggleHandler(EditAnnotationsWindow* ew) {
+    if (!ew || !ew->tab) {
+        return;
+    }
+
+    ToggleDockEditAnnotationsWindow(ew->tab);
+}
+
+static void ButtonCloseHandler(EditAnnotationsWindow* ew) {
+    if (!ew || !ew->tab) {
+        return;
+    }
+
+    MainWindow* win = ew->tab->win;
+
+    CloseAndDeleteEditAnnotationsWindow(ew->tab);
+
+    if (win && !win->isBeingClosed) {
+        win->lastLayoutState = {};
+        RelayoutWindow(win);
+    }
+}
+
 // return true if closed the window, false if there was no window to close
 bool CloseAndDeleteEditAnnotationsWindow(WindowTab* tab) {
-    if (!tab->editAnnotsWindow) {
+    if (!tab || !tab->editAnnotsWindow) {
         return false;
     }
-    auto ew = tab->editAnnotsWindow;
+
+    EditAnnotationsWindow* ew = tab->editAnnotsWindow;
+    MainWindow* win = tab->win;
+    bool wasDocked = ew->isDocked;
+
     tab->editAnnotsWindow = nullptr;
-    // this will trigger closing the window
     delete ew;
+
+    if (wasDocked && win && !win->isBeingClosed) {
+        if (win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+            HwndSetVisibility(win->editAnnotsSplitter->hwnd, false);
+        }
+
+        win->lastLayoutState = {};
+        RelayoutWindow(win);
+    }
+
     return true;
 }
 
+bool HasDockedEditAnnotationsWindow(WindowTab* tab) {
+    if (!tab || !tab->editAnnotsWindow) {
+        return false;
+    }
+
+    EditAnnotationsWindow* ew = tab->editAnnotsWindow;
+    return ew->isDocked && ew->hwnd;
+}
+
+bool IsEditAnnotationsDockedAndVisible(WindowTab* tab) {
+    if (!tab || !tab->editAnnotsWindow) {
+        return false;
+    }
+
+    EditAnnotationsWindow* ew = tab->editAnnotsWindow;
+    return ew->isDocked && ew->hwnd && IsWindowVisible(ew->hwnd);
+}
+
+HWND GetEditAnnotationsHwnd(WindowTab* tab) {
+    if (!tab || !tab->editAnnotsWindow) {
+        return nullptr;
+    }
+
+    return tab->editAnnotsWindow->hwnd;
+}
+
+void UpdateDockedEditAnnotationsVisibility(MainWindow* win) {
+    if (!win || !win->tabsCtrl) {
+        return;
+    }
+
+    WindowTab* current = win->CurrentTab();
+
+    for (WindowTab* tab : win->Tabs()) {
+        if (!HasDockedEditAnnotationsWindow(tab)) {
+            continue;
+        }
+
+        HWND hwndAnnots = GetEditAnnotationsHwnd(tab);
+        if (!hwndAnnots) {
+            continue;
+        }
+
+        bool show = tab == current && !win->presentation && !win->isFullScreen;
+        HwndSetVisibility(hwndAnnots, show);
+    }
+
+    win->lastLayoutState = {};
+
+    bool showSplitter = current && HasDockedEditAnnotationsWindow(current) && !win->presentation && !win->isFullScreen;
+
+    if (win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+        HwndSetVisibility(win->editAnnotsSplitter->hwnd, showSplitter);
+    }
+
+    RelayoutWindow(win);
+}
+
 EditAnnotationsWindow::~EditAnnotationsWindow() {
-    // hacky: we want the position of the main window
-    // but the size of client area
-    tab->lastEditAnnotsWindowPos = WindowRect(hwnd);
-    auto cr = ClientRect(hwnd);
-    tab->lastEditAnnotsWindowPos.dx = cr.dx;
-    tab->lastEditAnnotsWindowPos.dy = cr.dy;
+    if (!isDocked) {
+        // hacky: we want the position of the main window
+        // but the size of client area
+        tab->lastEditAnnotsWindowPos = WindowRect(hwnd);
+        auto cr = ClientRect(hwnd);
+        tab->lastEditAnnotsWindowPos.dx = cr.dx;
+        tab->lastEditAnnotsWindowPos.dy = cr.dy;
+    }
 
     if (tab->selectedAnnotation != nullptr) {
         tab->selectedAnnotation = nullptr;
@@ -340,6 +442,8 @@ static void EnableSaveIfAnnotationsChanged(EditAnnotationsWindow* ew) {
     bool didChange = DidAnnotationsChange(ew);
     ew->buttonSaveToCurrentFile->SetIsEnabled(didChange);
     ew->buttonSaveToNewFile->SetIsEnabled(didChange);
+
+    ToolbarUpdateStateForWindow(ew->tab->win, false);
 }
 
 void NotifyAnnotationsChanged(EditAnnotationsWindow* ew) {
@@ -374,12 +478,21 @@ static void RebuildAnnotationsListBox(EditAnnotationsWindow* ew) {
 }
 
 // TODO: this should be OnDestroy()
+
 static void OnClose(Wnd::CloseEvent* ev) {
     auto w = (EditAnnotationsWindow*)ev->e->self;
-    HWND toActivate = w->tab->win->hwndFrame;
+
+    MainWindow* win = w->tab->win;
+    bool wasDocked = w->isDocked;
+
     w->tab->editAnnotsWindow = nullptr;
     delete w; // TODO: sketchy
-    SetActiveWindow(toActivate);
+
+    if (wasDocked && !win->isBeingClosed) {
+        RelayoutWindow(win);
+    }
+
+    SetActiveWindow(win->hwndFrame);
 }
 
 void EditAnnotationsWindow::OnFocus() {
@@ -837,10 +950,25 @@ static void ColorSelectionChanged(EditAnnotationsWindow* ew) {
     if (!annot || !annot->engine) {
         return;
     }
+
+    int opacity = 255;
+    bool preserveOpacity = Type(annot) == AnnotationType::Highlight;
+    if (preserveOpacity) {
+        opacity = ew->trackbarOpacity->GetValue();
+    }
+
     auto idx = ew->dropDownColor->GetCurrentSelection();
     auto item = ew->dropDownColor->items.At(idx);
     auto col = GetDropDownColor(item);
+
     SetColor(annot, col);
+
+    if (preserveOpacity) {
+        SetOpacity(annot, opacity);
+        TempStr s = str::FormatTemp(_TRA("Opacity: %d"), opacity);
+        ew->staticOpacity->SetText(s);
+    }
+
     EnableSaveIfAnnotationsChanged(ew);
     MainWindowRerender(ew->tab->win);
 }
@@ -1137,17 +1265,16 @@ void EditAnnotationsWindow::OnSize(UINT msg, UINT, SIZE size) {
     if (!mainLayout) {
         return;
     }
+
     int dx = (int)size.cx;
     int dy = (int)size.cy;
     if (dx == 0 || dy == 0) {
         return;
     }
-    InvalidateRect(hwnd, nullptr, false);
-    if (false && mainLayout->lastBounds.EqSize(dx, dy)) {
-        // avoid un-necessary layout
-        return;
-    }
+
     LayoutToSize(mainLayout, {dx, dy});
+
+    RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
 
 static Static* CreateStatic(HWND parent, const char* s = nullptr) {
@@ -1170,9 +1297,57 @@ static void CreateMainLayout(EditAnnotationsWindow* ew) {
     HFONT fnt = GetAppFont();
 
     {
+        auto hbox = new HBox();
+        {
+            auto title = CreateStatic(parent, _TRA("Annotations"));
+            title->SetInsetsPt(0, 0, 0, 0);
+            ew->staticTitle = title;
+            hbox->AddChild(title, 1);
+        }
+
+        {
+            Button::CreateArgs args;
+            args.parent = parent;
+            args.text = ew->isDocked ? _TRA("Undock") : _TRA("Dock");
+            args.font = fnt;
+            args.isRtl = IsUIRtl();
+
+            auto dockToggleBtn = new Button();
+            dockToggleBtn->SetInsetsPt(0, 0, 0, 0);
+            HWND hwnd = dockToggleBtn->Create(args);
+            ReportIf(!hwnd);
+
+            dockToggleBtn->onClick = MkFunc0(ButtonDockToggleHandler, ew);
+
+            ew->buttonDockToggle = dockToggleBtn;
+            hbox->AddChild(dockToggleBtn);
+        }
+
+        {
+            Button::CreateArgs args;
+            args.parent = parent;
+            args.text = "\xC3\x97";
+            args.font = fnt;
+            args.isRtl = IsUIRtl();
+
+            auto closeBtn = new Button();
+            closeBtn->SetInsetsPt(0, 0, 0, 0);
+            HWND hwnd = closeBtn->Create(args);
+            ReportIf(!hwnd);
+
+            closeBtn->onClick = MkFunc0(ButtonCloseHandler, ew);
+
+            ew->buttonClose = closeBtn;
+            hbox->AddChild(closeBtn);
+        }
+
+        vbox->AddChild(hbox);
+    }
+
+    {
         ListBox::CreateArgs args;
         args.parent = parent;
-        args.idealSizeLines = 5;
+        args.idealSizeLines = 14;
         args.font = fnt;
         args.isRtl = IsUIRtl();
         auto w = new ListBox();
@@ -1222,7 +1397,7 @@ static void CreateMainLayout(EditAnnotationsWindow* ew) {
         Edit::CreateArgs args;
         args.parent = parent;
         args.isMultiLine = true;
-        args.idealSizeLines = 5;
+        args.idealSizeLines = 10;
         args.font = fnt;
         args.isRtl = IsUIRtl();
         auto w = new Edit();
@@ -1605,6 +1780,147 @@ static void LimitEditAnnotationsClientSizeToScreen(HWND hwnd, HWND hwndRelative,
     }
 }
 
+static bool gNextEditAnnotationsFloating = false;
+static bool gNextEditAnnotationsDocked = false;
+
+static bool UseDockedEditAnnotationsWindow() {
+    if (gNextEditAnnotationsFloating) {
+        gNextEditAnnotationsFloating = false;
+        return false;
+    }
+
+    if (gNextEditAnnotationsDocked) {
+        gNextEditAnnotationsDocked = false;
+        return true;
+    }
+
+    return true;
+}
+
+void ToggleDockEditAnnotationsWindow(WindowTab* tab) {
+    if (!tab || !tab->editAnnotsWindow) {
+        return;
+    }
+
+    EditAnnotationsWindow* ew = tab->editAnnotsWindow;
+    bool wasDocked = ew->isDocked;
+
+    if (wasDocked) {
+        MainWindow* win = tab->win;
+        if (win && win->editAnnotsSplitter && win->editAnnotsSplitter->hwnd) {
+            HwndSetVisibility(win->editAnnotsSplitter->hwnd, false);
+        }
+
+        gNextEditAnnotationsFloating = true;
+    } else {
+        gNextEditAnnotationsDocked = true;
+    }
+
+    CloseAndDeleteEditAnnotationsWindow(tab);
+    ShowEditAnnotationsWindow(tab, nullptr, EditAnnotFocus::Default);
+}
+
+void UndockEditAnnotationsWindow(WindowTab* tab) {
+    if (!tab || !tab->editAnnotsWindow) {
+        return;
+    }
+
+    Annotation* selectedAnnot = tab->selectedAnnotation;
+    EditAnnotFocus focus = EditAnnotFocus::Default;
+
+    gNextEditAnnotationsFloating = true;
+
+    CloseAndDeleteEditAnnotationsWindow(tab);
+
+    ShowEditAnnotationsWindow(tab, selectedAnnot, focus);
+}
+
+static COLORREF EditAnnotationsBgColor() {
+    if (UseDarkModeLib() && DarkMode::isEnabled()) {
+        return ThemeWindowControlBackgroundColor();
+    }
+    return MkGray(0xee);
+    //return ThemeWindowControlBackgroundColor();
+}
+
+static void SetEditAnnotationsBgColor(EditAnnotationsWindow* ew) {
+    if (!ew) {
+        return;
+    }
+
+    ew->SetColors(ThemeWindowTextColor(), EditAnnotationsBgColor());
+}
+
+static void CreateDockedEditAnnotationsWindow(EditAnnotationsWindow* ew, WindowTab* tab) {
+    CreateCustomArgs args;
+
+    args.parent = tab->win->hwndFrame;
+    args.visible = false;
+    args.font = GetAppFont();
+    args.style = WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+    args.exStyle = 0;
+
+    args.bgColor = EditAnnotationsBgColor();
+
+    ew->CreateCustom(args);
+    SetEditAnnotationsBgColor(ew);
+}
+
+static void CreateFloatingEditAnnotationsWindow(EditAnnotationsWindow* ew, WindowTab* tab) {
+    CreateCustomArgs args;
+
+    HMODULE h = GetModuleHandleW(nullptr);
+    WCHAR* iconName = MAKEINTRESOURCEW(GetAppIconID());
+    args.icon = LoadIconW(h, iconName);
+
+    args.bgColor = EditAnnotationsBgColor();
+
+    args.title = str::JoinTemp(_TRA("Annotations"), ": ", tab->GetTabTitle());
+    args.visible = false;
+    args.font = GetAppFont();
+
+    ew->CreateCustom(args);
+    SetEditAnnotationsBgColor(ew);
+}
+
+static BOOL CALLBACK UpdateEditAnnotationsChildTheme(HWND hwnd, LPARAM) {
+    if (UseDarkModeLib()) {
+        DarkMode::setDarkWndNotifySafe(hwnd);
+        DarkMode::setWindowEraseBgSubclass(hwnd);
+    }
+
+    RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
+    return TRUE;
+}
+
+void UpdateEditAnnotationsThemeForWindow(MainWindow* win) {
+    if (!win) {
+        return;
+    }
+
+    for (WindowTab* tab : win->Tabs()) {
+        if (!tab || !tab->editAnnotsWindow) {
+            continue;
+        }
+
+        EditAnnotationsWindow* ew = tab->editAnnotsWindow;
+        if (!ew || !ew->hwnd) {
+            continue;
+        }
+
+        EnumChildWindows(ew->hwnd, UpdateEditAnnotationsChildTheme, 0);
+        SetEditAnnotationsBgColor(ew);
+
+        if (UseDarkModeLib()) {
+            DarkMode::setDarkWndNotifySafe(ew->hwnd);
+            DarkMode::setWindowEraseBgSubclass(ew->hwnd);
+            DarkMode::setChildCtrlsTheme(ew->hwnd);
+        }
+
+        RedrawWindow(ew->hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+    }
+}
+
 void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus focus) {
     if (!tab) return;
     auto engine = tab->GetEngine();
@@ -1613,40 +1929,40 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
         ReportDebugIf(true);
         return;
     }
+
     EditAnnotationsWindow* ew = tab->editAnnotsWindow;
     if (ew) {
         bool isNew = annot != ew->tab->win->annotationUnderCursor;
+
         HwndMakeVisible(ew->hwnd);
-        SetForegroundWindow(ew->hwnd);
+
+        if (ew->isDocked) {
+            RelayoutWindow(tab->win);
+        } else {
+            SetForegroundWindow(ew->hwnd);
+        }
+
         if (ew->listBox && ew->listBox->model->ItemsCount() > 0) {
             HwndSetFocus(ew->listBox->hwnd);
         }
-        if (!annot) return;
+
+        if (!annot) {
+            return;
+        }
+
         SetSelectedAnnotation(tab, annot, isNew, focus);
         return;
     }
+
     ew = new EditAnnotationsWindow();
+    ew->isDocked = UseDockedEditAnnotationsWindow();
     ew->onClose = MkFunc1Void(OnClose);
-    CreateCustomArgs args;
-    HMODULE h = GetModuleHandleW(nullptr);
-    WCHAR* iconName = MAKEINTRESOURCEW(GetAppIconID());
-    args.icon = LoadIconW(h, iconName);
-    // mainWindow->isDialog = true;
-    if (UseDarkModeLib()) {
-        args.bgColor = DarkMode::isEnabled() ? ThemeWindowControlBackgroundColor() : MkGray(0xee);
+
+    if (ew->isDocked) {
+        CreateDockedEditAnnotationsWindow(ew, tab);
     } else {
-        args.bgColor = MkGray(0xee);
+        CreateFloatingEditAnnotationsWindow(ew, tab);
     }
-
-    args.title = str::JoinTemp(_TRA("Annotations"), ": ", tab->GetTabTitle());
-    args.visible = false;
-    args.font = GetAppFont();
-
-    // PositionCloseTo(w, args->hwndRelatedTo);
-    // SIZE winSize = {w->initialSize.dx, w->initialSize.Height};
-    // LimitWindowSizeToScreen(args->hwndRelatedTo, winSize);
-    // w->initialSize = {winSize.cx, winSize.cy};
-    ew->CreateCustom(args);
 
     CreateMainLayout(ew);
     ew->tab = tab;
@@ -1654,42 +1970,41 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
 
     UpdateAnnotationsList(ew);
 
-    Rect lastPos = tab->lastEditAnnotsWindowPos;
-    // size our editor window to be the same height as main window
-    int minDy = lastPos.dy;
-    if (minDy == 0) {
-        minDy = 720;
-        // TODO: this is slightly less that wanted
-        HWND hwnd = tab->win->hwndCanvas;
-        auto rc = ClientRect(hwnd);
-        if (rc.dy > 0) {
-            minDy = rc.dy;
+    if (!ew->isDocked) {
+        Rect lastPos = tab->lastEditAnnotsWindowPos;
+
+        int minDy = lastPos.dy;
+        if (minDy == 0) {
+            minDy = 720;
+            HWND hwnd = tab->win->hwndCanvas;
+            auto rc = ClientRect(hwnd);
+            if (rc.dy > 0) {
+                minDy = rc.dy;
+            }
+        }
+
+        if (minDy > 1024) {
+            ew->listBox->idealSizeLines = 14;
+        }
+
+        if (lastPos.IsEmpty()) {
+            SIZE size = {520, minDy};
+            LimitEditAnnotationsClientSizeToScreen(ew->hwnd, tab->win->hwndFrame, size);
+            LayoutAndSizeToContent(ew->mainLayout, size.cx, size.cy, ew->hwnd);
+            HwndPositionToTheRightOf(ew->hwnd, tab->win->hwndFrame);
+        } else {
+            SIZE size = {lastPos.dx, minDy};
+            LimitEditAnnotationsClientSizeToScreen(ew->hwnd, tab->win->hwndFrame, size);
+            LayoutAndSizeToContent(ew->mainLayout, size.cx, size.cy, ew->hwnd);
+
+            Rect r = WindowRect(ew->hwnd);
+            r.x = lastPos.x;
+            r.y = lastPos.y;
+            r = ShiftRectToWorkArea(r, nullptr, true);
+            SetWindowPos(ew->hwnd, nullptr, r.x, r.y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
         }
     }
 
-    // if it's a tall window, up the number of items in list box
-    // from 5 to 14
-    if (minDy > 1024) {
-        ew->listBox->idealSizeLines = 14;
-    }
-
-    if (lastPos.IsEmpty()) {
-        SIZE size = {520, minDy};
-        LimitEditAnnotationsClientSizeToScreen(ew->hwnd, tab->win->hwndFrame, size);
-        LayoutAndSizeToContent(ew->mainLayout, size.cx, size.cy, ew->hwnd);
-        HwndPositionToTheRightOf(ew->hwnd, tab->win->hwndFrame);
-    } else {
-        SIZE size = {lastPos.dx, minDy};
-        LimitEditAnnotationsClientSizeToScreen(ew->hwnd, tab->win->hwndFrame, size);
-        LayoutAndSizeToContent(ew->mainLayout, size.cx, size.cy, ew->hwnd);
-        // pass nullptr for hwnd so ShiftRectToWorkArea uses the saved rect
-        // to find the correct monitor (not the monitor the hwnd is currently on)
-        Rect r = WindowRect(ew->hwnd);
-        r.x = lastPos.x;
-        r.y = lastPos.y;
-        r = ShiftRectToWorkArea(r, nullptr, true);
-        SetWindowPos(ew->hwnd, nullptr, r.x, r.y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
-    }
     if (!annot) annot = ew->tab->selectedAnnotation;
     ew->skipGoToPage = (annot != nullptr);
     if (annot) {
@@ -1704,4 +2019,8 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
     // important to call this after hooking up onSize to ensure
     // first layout is triggered
     ew->SetIsVisible(true);
+
+    if (ew->isDocked) {
+        RelayoutWindow(tab->win);
+    }
 }
