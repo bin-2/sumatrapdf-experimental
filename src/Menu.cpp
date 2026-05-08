@@ -60,6 +60,7 @@ struct BuildMenuCtx {
     bool isPdf = false;
     bool isPdfEncrypted = false;
     bool hasToc = false;
+    bool canShowToc = false;
     int pageCount = 0;
     BuildMenuCtx() = default;
     ~BuildMenuCtx() = default;
@@ -1296,7 +1297,11 @@ BuildMenuCtx* NewBuildMenuCtx(WindowTab* tab, Point pt) {
     }
     ctx->hasSelection = tab->win->showSelection && tab->selectionOnPage;
     ctx->hasToc = tab->ctrl && tab->ctrl->HasToc();
+    ctx->canShowToc = tab->win && CanShowTocBoxForWindow(tab->win);
     ctx->pageCount = tab->ctrl ? tab->ctrl->PageCount() : 0;
+
+    //logf("NewBuildMenuCtx: hasToc=%d canShowToc=%d isPdf=%d engine=%p\n", (int)ctx->hasToc, (int)ctx->canShowToc,
+    //     (int)ctx->isPdf, engine);
     return ctx;
 }
 
@@ -1510,6 +1515,13 @@ std::pair<bool, bool> GetCommandIdState(BuildMenuCtx* ctx, int cmdId) {
 
     if (cmdId == CmdTabGroupSave) {
         disable |= !ctx->tab || !ctx->tab->win || !HasOpenedDocuments(ctx->tab->win);
+    }
+
+    if ((cmdId == CmdToggleBookmarks) || (cmdId == CmdToggleTableOfContents)) {
+        logf("GetCommandIdState: cmd=%d hasToc=%d canShowToc=%d remove=%d disable=%d\n", cmdId, (int)ctx->hasToc,
+             (int)ctx->canShowToc, (int)remove, (int)disable);
+
+        disable |= !ctx->canShowToc;
     }
 
     return {remove, disable};
@@ -1805,8 +1817,12 @@ static void MenuUpdateStateForWindow(MainWindow* win) {
 
     MenuUpdatePrintItem(win, win->menu);
 
-    bool enabled = win->IsDocLoaded() && tab && tab->ctrl->HasToc();
-    MenuSetEnabled(win->menu, CmdToggleBookmarks, enabled);
+    bool canShowToc = CanShowTocBoxForWindow(win);
+
+    logf("MenuUpdateStateForWindow: hasDoc=%d hasToc=%d canShowToc=%d tocVisible=%d\n", (int)(win->IsDocLoaded()),
+         (int)(tab && tab->ctrl && tab->ctrl->HasToc()), (int)canShowToc, (int)win->tocVisible);
+
+    MenuSetEnabled(win->menu, CmdToggleBookmarks, canShowToc);
 
     bool documentSpecific = win->IsDocLoaded();
     bool checked = documentSpecific ? win->tocVisible : gGlobalPrefs->showToc;
@@ -2017,7 +2033,12 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
     SetMenuStateForSelection(tab, popup);
 
     MenuUpdatePrintItem(win, popup, true);
-    MenuSetEnabled(popup, CmdToggleBookmarks, win->ctrl->HasToc());
+    bool canShowToc = CanShowTocBoxForWindow(win);
+
+    logf("ContextMenu: hasToc=%d canShowToc=%d tocVisible=%d\n", (int)(win->ctrl && win->ctrl->HasToc()),
+         (int)canShowToc, (int)win->tocVisible);
+
+    MenuSetEnabled(popup, CmdToggleBookmarks, canShowToc);
     MenuSetChecked(popup, CmdToggleBookmarks, win->tocVisible);
 
     MenuSetEnabled(popup, CmdFavoriteToggle, HasFavorites());

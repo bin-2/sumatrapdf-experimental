@@ -58,6 +58,8 @@ const char* ParseEmbeddedStreamNumber(const char* path, int* streamNoOut);
 Annotation* EngineMupdfCreateAnnotation(EngineBase*, int pageNo, PointF pos, AnnotCreateArgs* args);
 void EngineMupdfGetAnnotations(EngineBase*, Vec<Annotation*>&);
 bool EngineMupdfHasUnsavedAnnotations(EngineBase*);
+bool EngineMupdfHasUnsavedPdfBookmarks(EngineBase*);
+bool EngineMupdfHasUnsavedPdfChanges(EngineBase*);
 bool EngineMupdfSupportsAnnotations(EngineBase*);
 bool EngineMupdfIsEncrypted(EngineBase* engine);
 const char* EngineMupdfGetPassword(EngineBase* engine);

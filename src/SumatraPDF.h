@@ -234,3 +234,5 @@ void SmartZoom(MainWindow* win, float factor, Point* pt, bool smartZoom);
 TempStr GetNotImportantDataDirTemp();
 TempStr GetCrashInfoDirTemp();
 TempStr GetVerDirNameTemp(const char* prefix);
+
+bool CanShowTocBoxForWindow(MainWindow* win);

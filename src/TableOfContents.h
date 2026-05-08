@@ -10,6 +10,8 @@ void UpdateTocExpansionState(Vec<int>& tocState, TreeView*, TocTree*);
 void UnsubclassToc(MainWindow*);
 void TocFilterChanged(MainWindow*);
 
+bool AddPdfBookmarkForCurrentPageAndShowToc(MainWindow* win);
+
 // shared with Favorites.cpp
 // void TocCustomizeTooltip(TreeItem::GetTooltipEvent*);
 // LRESULT TocTreeKeyDown2(TreeKeyDownEvent*);

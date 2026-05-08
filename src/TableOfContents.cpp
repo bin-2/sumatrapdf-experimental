@@ -35,11 +35,14 @@
 #include "TableOfContents.h"
 #include "Translations.h"
 #include "Tabs.h"
+#include "Toolbar.h"
+#include "Selection.h"
 #include "Menu.h"
 #include "Accelerators.h"
 #include "Theme.h"
 
 #include "utils/Log.h"
+#include "PdfBookmarkEditor.h"
 
 /* Define if you want page numbers to be displayed in the ToC sidebar */
 // #define DISPLAY_TOC_PAGE_NUMBERS
@@ -49,6 +52,7 @@
 #endif
 
 static void LayoutTocContainer(MainWindow* win);
+static bool HasTocFilter(MainWindow* win);
 
 // set tooltip for this item but only if the text isn't fully shown
 // TODO: I might have lost something in translation
@@ -177,6 +181,27 @@ struct GoToTocLinkData {
     WindowTab* tab;
     DocController* ctrl;
 };
+
+enum class TocBookmarkDropMode {
+    None,
+    Before,
+    After,
+    AsChild,
+    RootEnd,
+};
+
+struct TocBookmarkDragState {
+    bool active = false;
+    TocItem* source = nullptr;
+    TocItem* target = nullptr;
+    TocBookmarkDropMode mode = TocBookmarkDropMode::None;
+    HTREEITEM sourceHItem = nullptr;
+    HTREEITEM targetHItem = nullptr;
+    HIMAGELIST dragImage = nullptr;
+};
+
+static TocBookmarkDragState gTocBookmarkDrag;
+
 
 static void GoToTocLink(GoToTocLinkData* d) {
     AutoDelete delData(d);
@@ -512,6 +537,22 @@ static void SaveEmbeddedFile(WindowTab* tab, const char* srcPath, const char* fi
     str::Free(data.data());
 }
 
+
+static void NotifyPdfBookmarksChanged(MainWindow* win) {
+    if (!win) {
+        return;
+    }
+
+    ToolbarUpdateStateForWindow(win, false);
+
+    if (win->tocTreeView && win->tocTreeView->hwnd) {
+        InvalidateRect(win->tocTreeView->hwnd, nullptr, TRUE);
+    }
+}
+
+static TempStr CleanBookmarkTitleTemp(const char* s);
+bool SavePdfBookmarksToExistingFile(WindowTab* tab);
+bool SavePdfBookmarksToMaybeNewPdfFile(WindowTab* tab);
 // clang-format off
 static MenuDef menuDefContextToc[] = {
     {
@@ -521,6 +562,50 @@ static MenuDef menuDefContextToc[] = {
     {
         _TRN("Collapse All"),
         CmdCollapseAll,
+    },
+    {
+        kMenuSeparator,
+        0,
+    },
+    {
+        _TRN("Add Bookmark After This"),
+        CmdPdfAddBookmark,
+    },
+    {
+        _TRN("Add Child Bookmark"),
+        CmdPdfAddChildBookmark,
+    },
+    {
+        _TRN("Rename Bookmark"),
+        CmdPdfRenameBookmark,
+    },
+    {
+        _TRN("Delete Bookmark"),
+        CmdPdfDeleteBookmark,
+    },
+    {
+        kMenuSeparator,
+        0,
+    },
+    {
+        _TRN("Move Bookmark Up"),
+        CmdPdfMoveBookmarkUp,
+    },
+    {
+        _TRN("Move Bookmark Down"),
+        CmdPdfMoveBookmarkDown,
+    },
+    {
+        kMenuSeparator,
+        0,
+    },
+    {
+        _TRN("Save Bookmark Changes"),
+        CmdPdfSaveBookmarks,
+    },
+    {
+        _TRN("Save Bookmark Changes As..."),
+        CmdPdfSaveBookmarksNewFile,
     },
     {
         kMenuSeparator,
@@ -542,7 +627,6 @@ static MenuDef menuDefContextToc[] = {
         _TRN("Save Attachment..."),
         CmdSaveAttachment,
     },
-    // note: strings cannot be "" or else items are not there
     {
         "Add to favorites",
         CmdFavoriteAdd,
@@ -558,46 +642,356 @@ static MenuDef menuDefContextToc[] = {
 };
 // clang-format on
 
+////////////////// BOOKMARKS ///////////////////////////////
+static bool BeginRenameTocBookmark(MainWindow* win, TocItem* item);
+static bool CommitRenameTocBookmark(MainWindow* win, NMTVDISPINFOW* info);
+static bool DeletePdfBookmark(MainWindow* win, TocItem* item);
+static bool AddPdfBookmarkAfterTocItem(MainWindow* win, TocItem* afterItem);
+static bool AddChildPdfBookmarkToTocItem(MainWindow* win, TocItem* parentItem);
+static bool MovePdfBookmark(MainWindow* win, TocItem* item, bool moveDown);
+
+static bool SelectionIsOnlyOnPage(WindowTab* tab, int pageNo) {
+    if (!tab || !tab->selectionOnPage || tab->selectionOnPage->size() == 0) {
+        return false;
+    }
+
+    for (SelectionOnPage& sel : *tab->selectionOnPage) {
+        if (sel.pageNo != pageNo) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static TempStr GetBookmarkTitleForCurrentSelectionTemp(WindowTab* tab, int pageNo) {
+    if (!SelectionIsOnlyOnPage(tab, pageNo)) {
+        return nullptr;
+    }
+
+    bool isTextOnlySelection = false;
+    TempStr selectedText = GetSelectedTextTemp(tab, " ", isTextOnlySelection);
+
+    // Avoid using rectangular/image-style selections as bookmark titles.
+    if (!isTextOnlySelection) {
+        return nullptr;
+    }
+
+    return CleanBookmarkTitleTemp(selectedText);
+}
+
+static TempStr GetDefaultPdfBookmarkTitleTemp(WindowTab* tab, int pageNo) {
+    TempStr selectedTitle = GetBookmarkTitleForCurrentSelectionTemp(tab, pageNo);
+    if (!str::IsEmpty(selectedTitle)) {
+        return selectedTitle;
+    }
+
+    return str::FormatTemp("Page %d", pageNo);
+}
+
+static bool AddPdfBookmarkAfterTocItem(MainWindow* win, TocItem* afterItem) {
+    if (!win || !win->ctrl || !afterItem) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    int pageNo = win->ctrl->CurrentPageNo();
+    if (pageNo <= 0) {
+        return false;
+    }
+
+    WindowTab* tab = win->CurrentTab();
+    TempStr title = GetDefaultPdfBookmarkTitleTemp(tab, pageNo);
+
+    PdfBookmarkEditor editor(engine);
+    if (!editor.AddBookmarkAfter(afterItem, title, pageNo)) {
+        return false;
+    }
+
+    TreeView* treeView = win->tocTreeView;
+    if (treeView && treeView->hwnd) {
+        treeView->SetTreeModel(treeView->treeModel);
+        treeView->SelectItem((TreeItem)afterItem->next);
+        InvalidateRect(treeView->hwnd, nullptr, TRUE);
+    }
+
+    NotifyPdfBookmarksChanged(win);
+    return true;
+}
+
+static bool BeginRenameTocBookmark(MainWindow* win, TocItem* item) {
+    if (!win || !win->tocTreeView || !item) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    HWND hwndTree = win->tocTreeView->hwnd;
+    if (!hwndTree) {
+        return false;
+    }
+
+    HTREEITEM hItem = item->hItem;
+    if (!hItem) {
+        hItem = TreeView_GetSelection(hwndTree);
+    }
+
+    if (!hItem) {
+        return false;
+    }
+
+    LONG_PTR style = GetWindowLongPtrW(hwndTree, GWL_STYLE);
+    SetWindowLongPtrW(hwndTree, GWL_STYLE, style | (LONG_PTR)TVS_EDITLABELS);
+
+    SetFocus(hwndTree);
+
+    HWND hwndEdit = TreeView_EditLabel(hwndTree, hItem);
+    return hwndEdit != nullptr;
+}
+
+// Commits native TreeView label-edit text through PdfBookmarkEditor.
+static bool CommitRenameTocBookmark(MainWindow* win, NMTVDISPINFOW* info) {
+    if (!win || !info) {
+        return false;
+    }
+
+    // User canceled editing, usually with Esc.
+    if (!info->item.pszText) {
+        return false;
+    }
+
+    TocItem* item = (TocItem*)info->item.lParam;
+    if (!item) {
+        return false;
+    }
+
+    TempStr newTitle = ToUtf8Temp(info->item.pszText);
+    if (!newTitle) {
+        return false;
+    }
+
+    // Reject empty or whitespace-only titles.
+    const char* s = newTitle;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') {
+        s++;
+    }
+    if (*s == '\0') {
+        return false;
+    }
+
+    // No-op rename. Accept so the edit box closes cleanly.
+    if (item->title && str::Eq(item->title, newTitle)) {
+        return true;
+    }
+
+    EngineBase* engine = nullptr;
+    DisplayModel* dm = win->AsFixed();
+    if (dm) {
+        engine = dm->GetEngine();
+    }
+
+    PdfBookmarkEditor editor(engine);
+    bool ok = editor.RenameBookmark(item, newTitle);
+    if (!ok) {
+        return false;
+    }
+
+    NotifyPdfBookmarksChanged(win);
+    return true;
+}
+
+static bool AddRootPdfBookmark(MainWindow* win) {
+    if (!win || !win->ctrl) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    int pageNo = win->ctrl->CurrentPageNo();
+    if (pageNo <= 0) {
+        return false;
+    }
+
+    WindowTab* tab = win->CurrentTab();
+    TempStr title = GetDefaultPdfBookmarkTitleTemp(tab, pageNo);
+
+    PdfBookmarkEditor editor(engine);
+    if (!editor.AddRootBookmark(title, pageNo)) {
+        return false;
+    }
+
+    TreeView* treeView = win->tocTreeView;
+    if (treeView && treeView->hwnd) {
+        TocTree* model = tab ? tab->currToc : nullptr;
+        if (!model) {
+            model = editor.GetOrCreateTocTree();
+            if (tab) {
+                tab->currToc = model;
+            }
+        }
+
+        treeView->Clear();
+        treeView->SetTreeModel(model);
+
+        if (model && model->root && model->root->child) {
+            TocItem* item = model->root->child;
+            while (item->next) {
+                item = item->next;
+            }
+            treeView->SelectItem((TreeItem)item);
+        }
+
+        InvalidateRect(treeView->hwnd, nullptr, TRUE);
+    }
+
+    NotifyPdfBookmarksChanged(win);
+    return true;
+}
+
 static void TocContextMenu(ContextMenuEvent* ev) {
+    if (!ev || !ev->w) {
+        return;
+    }
+
     MainWindow* win = FindMainWindowByHwnd(ev->w->hwnd);
-    const char* filePath = win->ctrl->GetFilePath();
+    if (!win || !win->ctrl) {
+        return;
+    }
 
     POINT pt{};
-
-    TreeView* treeView = (TreeView*)ev->w;
-    TreeModel* tm = treeView->treeModel;
     TreeItem ti = GetOrSelectTreeItemAtPos(ev, pt);
     if (ti == TreeModel::kNullItem) {
         pt = {ev->mouseScreen.x, ev->mouseScreen.y};
     }
-    int pageNo = 0;
-    TocItem* dti = (TocItem*)ti;
-    IPageDestination* dest = dti ? dti->dest : nullptr;
-    if (dest) {
-        pageNo = PageDestGetPageNo(dti->dest);
+
+    TocItem* dti = nullptr;
+    if (ti != TreeModel::kNullItem) {
+        dti = (TocItem*)ti;
     }
 
     WindowTab* tab = win->CurrentTab();
+
+    EngineBase* engine = nullptr;
+    if (tab && tab->AsFixed()) {
+        engine = tab->AsFixed()->GetEngine();
+    }
+
+    const bool filterActive = HasTocFilter(win);
+
+    bool canEditPdfBookmarks = false;
+    bool canRenamePdfBookmark = false;
+    bool canAddPdfBookmark = false;
+    bool canDeletePdfBookmark = false;
+    bool canAddChildPdfBookmark = false;
+    bool canMovePdfBookmarkUp = false;
+    bool canMovePdfBookmarkDown = false;
+
+    if (!filterActive && engine) {
+        PdfBookmarkEditor editor(engine);
+
+        canEditPdfBookmarks = editor.CanEditBookmarks();
+        canAddPdfBookmark = canEditPdfBookmarks && editor.CanAddBookmarks();
+
+        if (dti) {
+            canRenamePdfBookmark = canEditPdfBookmarks && editor.CanRenameBookmarks();
+            canAddChildPdfBookmark = canEditPdfBookmarks && editor.CanAddBookmarks();
+            canDeletePdfBookmark = canEditPdfBookmarks && editor.CanDeleteBookmarks();
+            canMovePdfBookmarkUp = canEditPdfBookmarks && editor.CanMoveBookmarkUp(dti);
+            canMovePdfBookmarkDown = canEditPdfBookmarks && editor.CanMoveBookmarkDown(dti);
+        }
+    }
+
+    bool hasUnsavedPdfBookmarks = false;
+    if (engine) {
+        hasUnsavedPdfBookmarks = EngineMupdfHasUnsavedPdfBookmarks(engine);
+    }
+
+    int pageNo = 0;
+    IPageDestination* dest = dti ? dti->dest : nullptr;
+    if (dest) {
+        pageNo = PageDestGetPageNo(dest);
+    }
+
+    const char* filePath = win->ctrl->GetFilePath();
+
     HMENU popup = BuildMenuFromDef(menuDefContextToc, CreatePopupMenu(), nullptr);
+    if (!popup) {
+        return;
+    }
+
+    if (!canAddPdfBookmark) {
+        MenuRemove(popup, CmdPdfAddBookmark);
+    }
+    if (canAddPdfBookmark) {
+        MenuSetText(popup, CmdPdfAddBookmark, dti ? _TRA("Add Bookmark After This") : _TRA("Add Bookmark Here"));
+    }
+
+    if (!canAddChildPdfBookmark) {
+        MenuRemove(popup, CmdPdfAddChildBookmark);
+    }
+
+    if (!canRenamePdfBookmark) {
+        MenuRemove(popup, CmdPdfRenameBookmark);
+    }
+
+    if (!canDeletePdfBookmark) {
+        MenuRemove(popup, CmdPdfDeleteBookmark);
+    }
+
+    if (!canMovePdfBookmarkUp) {
+        MenuRemove(popup, CmdPdfMoveBookmarkUp);
+    }
+
+    if (!canMovePdfBookmarkDown) {
+        MenuRemove(popup, CmdPdfMoveBookmarkDown);
+    }
+
+    if (!hasUnsavedPdfBookmarks) {
+        MenuRemove(popup, CmdPdfSaveBookmarks);
+        MenuRemove(popup, CmdPdfSaveBookmarksNewFile);
+    }
 
     const char* path = nullptr;
     char* fileName = nullptr;
     Kind destKind = dest ? dest->GetKind() : nullptr;
 
-    // TODO: this is pontentially not used at all
     if (destKind == kindDestinationLaunchEmbedded) {
         auto embeddedFile = (PageDestinationFile*)dest;
-        // this is a path to a file on disk, e.g. a path to opened PDF
-        // with the embedded stream number
         path = embeddedFile->path;
-        // this is name of the file as set inside PDF file
         fileName = PageDestGetName(dest);
-        bool canOpenEmbedded = str::EndsWithI(fileName, ".pdf");
+
+        bool canOpenEmbedded = fileName && str::EndsWithI(fileName, ".pdf");
         if (!canOpenEmbedded) {
             MenuRemove(popup, CmdOpenEmbeddedPDF);
         }
     } else {
-        // TODO: maybe move this to BuildMenuFromMenuDef
         MenuRemove(popup, CmdSaveEmbeddedFile);
         MenuRemove(popup, CmdOpenEmbeddedPDF);
     }
@@ -605,37 +999,34 @@ static void TocContextMenu(ContextMenuEvent* ev) {
     int attachmentNo = -1;
     if (destKind == kindDestinationAttachment) {
         auto attachment = (PageDestinationFile*)dest;
-        // this is a path to a file on disk, e.g. a path to opened PDF
-        // with the embedded stream number
         path = attachment->path;
-        // this is name of the file as set inside PDF file
         fileName = PageDestGetName(dest);
-        // hack: attachmentNo is saved in pageNo see
-        // PdfLoadAttachments and DestFromAttachment
+
+        // attachmentNo is saved in pageNo. See PdfLoadAttachments and DestFromAttachment.
         attachmentNo = pageNo;
-        bool canOpenEmbedded = str::EndsWithI(fileName, ".pdf");
-        if (!canOpenEmbedded) {
+
+        bool canOpenAttachment = fileName && str::EndsWithI(fileName, ".pdf");
+        if (!canOpenAttachment) {
             MenuRemove(popup, CmdOpenAttachment);
         }
     } else {
-        // TODO: maybe move this to BuildMenuFromMenuDef
         MenuRemove(popup, CmdSaveAttachment);
         MenuRemove(popup, CmdOpenAttachment);
     }
 
-    if (pageNo > 0) {
+    if (pageNo > 0 && filePath) {
         TempStr pageLabel = win->ctrl->GetPageLabeTemp(pageNo);
         bool isBookmarked = IsPageInFavorites(filePath, pageNo);
+
         if (isBookmarked) {
             MenuRemove(popup, CmdFavoriteAdd);
 
-            // %s and not %d because re-using translation from RebuildFavMenu()
             const char* tr = _TRA("Remove page %s from favorites");
             TempStr s = str::FormatTemp(tr, pageLabel);
             MenuSetText(popup, CmdFavoriteDel, s);
         } else {
             MenuRemove(popup, CmdFavoriteDel);
-            // %s and not %d because re-using translation from RebuildFavMenu()
+
             TempStr s = str::FormatTemp(_TRA("Add page %s to favorites"), pageLabel);
             s = AppendAccelKeyToMenuStringTemp(s, CmdFavoriteAdd);
             MenuSetText(popup, CmdFavoriteAdd, s);
@@ -644,40 +1035,379 @@ static void TocContextMenu(ContextMenuEvent* ev) {
         MenuRemove(popup, CmdFavoriteAdd);
         MenuRemove(popup, CmdFavoriteDel);
     }
+
     RemoveBadMenuSeparators(popup);
     MarkMenuOwnerDraw(popup);
+
     uint flags = TPM_RETURNCMD | TPM_RIGHTBUTTON;
     int cmd = TrackPopupMenu(popup, flags, pt.x, pt.y, 0, win->hwndFrame, nullptr);
+
     FreeMenuOwnerDrawInfoData(popup);
     DestroyMenu(popup);
+
     switch (cmd) {
         case CmdExpandAll:
             win->tocTreeView->ExpandAll();
             break;
+
         case CmdCollapseAll:
             win->tocTreeView->CollapseAll();
             break;
+
+        case CmdPdfAddBookmark:
+            if (canAddPdfBookmark) {
+                if (dti) {
+                    AddPdfBookmarkAfterTocItem(win, dti);
+                } else {
+                    AddRootPdfBookmark(win);
+                }
+            }
+            break;
+
+        case CmdPdfAddChildBookmark:
+            if (canAddChildPdfBookmark) {
+                AddChildPdfBookmarkToTocItem(win, dti);
+            }
+            break;
+
+        case CmdPdfRenameBookmark:
+            if (canRenamePdfBookmark) {
+                BeginRenameTocBookmark(win, dti);
+            }
+            break;
+
+        case CmdPdfDeleteBookmark:
+            if (canDeletePdfBookmark) {
+                DeletePdfBookmark(win, dti);
+            }
+            break;
+
+        case CmdPdfMoveBookmarkUp:
+            if (canMovePdfBookmarkUp) {
+                MovePdfBookmark(win, dti, false);
+            }
+            break;
+
+        case CmdPdfMoveBookmarkDown:
+            if (canMovePdfBookmarkDown) {
+                MovePdfBookmark(win, dti, true);
+            }
+            break;
+
+        case CmdPdfSaveBookmarks:
+            if (tab && hasUnsavedPdfBookmarks) {
+                SavePdfBookmarksToExistingFile(tab);
+            }
+            break;
+
+        case CmdPdfSaveBookmarksNewFile:
+            if (tab && hasUnsavedPdfBookmarks) {
+                SavePdfBookmarksToMaybeNewPdfFile(tab);
+            }
+            break;
+
         case CmdFavoriteAdd:
-            AddFavoriteFromToc(win, dti);
+            if (filePath && pageNo > 0 && dti) {
+                AddFavoriteFromToc(win, dti);
+            }
             break;
+
         case CmdFavoriteDel:
-            DelFavorite(filePath, pageNo);
+            if (filePath && pageNo > 0) {
+                DelFavorite(filePath, pageNo);
+            }
             break;
-        case CmdSaveEmbeddedFile: {
-            SaveEmbeddedFile(tab, path, fileName);
-        } break;
+
+        case CmdSaveEmbeddedFile:
+            if (tab && path && fileName) {
+                SaveEmbeddedFile(tab, path, fileName);
+            }
+            break;
+
         case CmdOpenEmbeddedPDF:
-            // TODO: maybe also allow for a fileName hint
-            OpenEmbeddedFile(tab, dest);
+            if (tab && dest) {
+                OpenEmbeddedFile(tab, dest);
+            }
             break;
-        case CmdSaveAttachment: {
-            SaveAttachment(tab, fileName, attachmentNo);
+
+        case CmdSaveAttachment:
+            if (tab && fileName && attachmentNo >= 0) {
+                SaveAttachment(tab, fileName, attachmentNo);
+            }
             break;
+
+        case CmdOpenAttachment:
+            if (tab && fileName && attachmentNo >= 0) {
+                OpenAttachment(tab, fileName, attachmentNo);
+            }
+            break;
+    }
+}
+
+static bool AddChildPdfBookmarkToTocItem(MainWindow* win, TocItem* parentItem) {
+    if (!win || !win->ctrl || !parentItem) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    int pageNo = win->ctrl->CurrentPageNo();
+    if (pageNo <= 0) {
+        return false;
+    }
+
+    WindowTab* tab = win->CurrentTab();
+    TempStr title = GetDefaultPdfBookmarkTitleTemp(tab, pageNo);
+
+    PdfBookmarkEditor editor(engine);
+    if (!editor.AddChildBookmark(parentItem, title, pageNo)) {
+        return false;
+    }
+
+    TreeView* treeView = win->tocTreeView;
+    if (treeView && treeView->hwnd) {
+        treeView->SetTreeModel(treeView->treeModel);
+        treeView->SelectItem((TreeItem)parentItem->child);
+        InvalidateRect(treeView->hwnd, nullptr, TRUE);
+    }
+
+    NotifyPdfBookmarksChanged(win);
+    return true;
+}
+
+static TempStr CleanBookmarkTitleTemp(const char* s) {
+    if (str::IsEmpty(s)) {
+        return nullptr;
+    }
+
+    StrBuilder title;
+    bool pendingSpace = false;
+
+    for (const char* p = s; *p; p++) {
+        if (str::IsWs(*p)) {
+            pendingSpace = title.Size() > 0;
+            continue;
         }
-        case CmdOpenAttachment: {
-            OpenAttachment(tab, fileName, attachmentNo);
+
+        if (pendingSpace) {
+            title.AppendChar(' ');
+            pendingSpace = false;
+        }
+
+        title.AppendChar(*p);
+
+        // Keep bookmark labels readable. Long selected paragraphs make bad TOC entries.
+        if (title.Size() >= 120) {
+            title.Append("...");
+            break;
         }
     }
+
+    if (title.Size() == 0) {
+        return nullptr;
+    }
+
+    return str::DupTemp(title.CStr());
+}
+
+static int CountTocItemDescendants(TocItem* item) {
+    if (!item) {
+        return 0;
+    }
+
+    int count = 0;
+
+    for (TocItem* child = item->child; child; child = child->next) {
+        count++;
+        count += CountTocItemDescendants(child);
+    }
+
+    return count;
+}
+
+static bool ConfirmDeletePdfBookmark(MainWindow* win, TocItem* item) {
+    if (!win || !item) {
+        return false;
+    }
+
+    const char* title = item->title ? item->title : "";
+    int childCount = CountTocItemDescendants(item);
+
+    TempStr msg = nullptr;
+    if (childCount > 0) {
+        msg = str::FormatTemp(_TRA("Delete bookmark \"%s\" and its %d child bookmarks?"), title, childCount);
+    } else {
+        msg = str::FormatTemp(_TRA("Delete bookmark \"%s\"?"), title);
+    }
+
+    TempWStr msgW = ToWStrTemp(msg);
+    TempWStr titleW = ToWStrTemp(_TRA("Delete Bookmark"));
+
+    int res = MessageBoxW(win->hwndFrame, msgW, titleW, MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+    return res == IDYES;
+}
+
+static bool DeletePdfBookmark(MainWindow* win, TocItem* item) {
+    if (!win || !win->ctrl || !win->tocTreeView || !item) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    if (!ConfirmDeletePdfBookmark(win, item)) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    TocItem* itemToSelect = item->next;
+
+    PdfBookmarkEditor editor(engine);
+    if (!editor.DeleteBookmark(item)) {
+        return false;
+    }
+
+    TreeView* treeView = win->tocTreeView;
+    if (treeView && treeView->hwnd) {
+        TreeModel* model = treeView->treeModel;
+
+        treeView->Clear();
+        treeView->SetTreeModel(model);
+
+        if (itemToSelect) {
+            treeView->SelectItem((TreeItem)itemToSelect);
+        }
+
+        InvalidateRect(treeView->hwnd, nullptr, TRUE);
+    }
+
+    NotifyPdfBookmarksChanged(win);
+    return true;
+}
+
+static bool MovePdfBookmark(MainWindow* win, TocItem* item, bool moveDown) {
+    if (!win || !win->ctrl || !win->tocTreeView || !item) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    PdfBookmarkEditor editor(engine);
+
+    bool ok = moveDown ? editor.MoveBookmarkDown(item) : editor.MoveBookmarkUp(item);
+    if (!ok) {
+        return false;
+    }
+
+    TreeView* treeView = win->tocTreeView;
+    if (treeView && treeView->hwnd) {
+        TreeModel* model = treeView->treeModel;
+
+        treeView->Clear();
+        treeView->SetTreeModel(model);
+        treeView->SelectItem((TreeItem)item);
+
+        InvalidateRect(treeView->hwnd, nullptr, TRUE);
+    }
+
+    NotifyPdfBookmarksChanged(win);
+    return true;
+}
+
+static bool CanAddRootPdfBookmarkForCurrentPage(MainWindow* win) {
+    if (!win || !win->ctrl) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    int pageNo = win->ctrl->CurrentPageNo();
+    if (pageNo <= 0) {
+        return false;
+    }
+
+    PdfBookmarkEditor editor(engine);
+    return editor.CanEditBookmarks() && editor.CanAddBookmarks();
+}
+
+static void ClearTocFilterIfAny(MainWindow* win) {
+    if (!win || !win->tocFilterEdit) {
+        return;
+    }
+
+    if (!HasTocFilter(win)) {
+        return;
+    }
+
+    win->tocFilterEdit->SetText("");
+}
+
+bool AddPdfBookmarkForCurrentPageAndShowToc(MainWindow* win) {
+    if (!CanAddRootPdfBookmarkForCurrentPage(win)) {
+        return false;
+    }
+
+    ClearTocFilterIfAny(win);
+
+    if (!win->tocVisible) {
+        SetSidebarVisibility(win, true, gGlobalPrefs->showFavorites);
+    }
+
+    if (win->tocVisible && !win->tocLoaded) {
+        LoadTocTree(win);
+    }
+
+    if (!AddRootPdfBookmark(win)) {
+        return false;
+    }
+
+    if (win->tocVisible && win->tocTreeView && win->tocTreeView->hwnd) {
+        HwndSetFocus(win->tocTreeView->hwnd);
+    }
+
+    return true;
 }
 
 void OnTocCustomDraw(TreeView::CustomDrawEvent*);
@@ -710,8 +1440,6 @@ void LoadTocTree(MainWindow* win) {
         return;
     }
 
-    win->tocLoaded = true;
-
     // clear filter when loading new toc
     // null out currToc first so that SetText("") callback doesn't use stale pointer
     delete win->tocFilteredTree;
@@ -722,6 +1450,15 @@ void LoadTocTree(MainWindow* win) {
     }
 
     auto* tocTree = tab->ctrl->GetToc();
+
+    if (!tocTree || !tocTree->root) {
+        DisplayModel* dm = win->AsFixed();
+        EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+
+        PdfBookmarkEditor editor(engine);
+        tocTree = editor.GetOrCreateTocTree();
+    }
+
     if (!tocTree || !tocTree->root) {
         return;
     }
@@ -748,6 +1485,8 @@ void LoadTocTree(MainWindow* win) {
     LayoutTocContainer(win);
     // uint fl = RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN;
     // RedrawWindow(hwnd, nullptr, nullptr, fl);
+
+    win->tocLoaded = true;
 }
 
 // TODO: use https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-getobject?redirectedfrom=MSDN
@@ -1080,19 +1819,595 @@ static void LayoutTocContainer(MainWindow* win) {
     MoveWindow(treeView->hwnd, 0, y, rc.dx, dy, TRUE);
 }
 
+static bool GetCurrentTreeClientPoint(HWND hwndTree, POINT* ptTree) {
+    if (!hwndTree || !ptTree) {
+        return false;
+    }
+
+    POINT ptScreen{};
+    if (!GetCursorPos(&ptScreen)) {
+        return false;
+    }
+
+    *ptTree = ptScreen;
+    ScreenToClient(hwndTree, ptTree);
+    return true;
+}
+
+static bool GetTreeClientPointFromScreen(HWND hwndTree, POINT ptScreen, POINT* ptTree) {
+    if (!hwndTree || !ptTree) {
+        return false;
+    }
+
+    *ptTree = ptScreen;
+    ScreenToClient(hwndTree, ptTree);
+    return true;
+}
+
+static TocItem* GetTocItemFromTreeItem(HWND hwndTree, HTREEITEM hItem) {
+    if (!hwndTree || !hItem) {
+        return nullptr;
+    }
+
+    TVITEMW tvItem{};
+    tvItem.mask = TVIF_PARAM;
+    tvItem.hItem = hItem;
+
+    if (!TreeView_GetItem(hwndTree, &tvItem)) {
+        return nullptr;
+    }
+
+    return (TocItem*)tvItem.lParam;
+}
+
+static TocBookmarkDropMode GetDropModeFromTreePoint(HWND hwndTree, HTREEITEM hItem, POINT ptTree) {
+    if (!hwndTree || !hItem) {
+        return TocBookmarkDropMode::None;
+    }
+
+    RECT rc{};
+    if (!TreeView_GetItemRect(hwndTree, hItem, &rc, TRUE)) {
+        return TocBookmarkDropMode::None;
+    }
+
+    int height = rc.bottom - rc.top;
+    if (height <= 0) {
+        return TocBookmarkDropMode::None;
+    }
+
+    int y = ptTree.y - rc.top;
+
+    if (y < height / 3) {
+        return TocBookmarkDropMode::Before;
+    }
+
+    if (y > (height * 2) / 3) {
+        return TocBookmarkDropMode::After;
+    }
+
+    return TocBookmarkDropMode::AsChild;
+}
+
+static const char* TocBookmarkDropModeName(TocBookmarkDropMode mode) {
+    switch (mode) {
+        case TocBookmarkDropMode::Before:
+            return "Before";
+        case TocBookmarkDropMode::After:
+            return "After";
+        case TocBookmarkDropMode::AsChild:
+            return "AsChild";
+        case TocBookmarkDropMode::RootEnd:
+            return "RootEnd";
+        case TocBookmarkDropMode::None:
+        default:
+            return "None";
+    }
+}
+
+static bool IsTocItemAncestorOf(TocItem* maybeAncestor, TocItem* item) {
+    if (!maybeAncestor || !item) {
+        return false;
+    }
+
+    for (TocItem* child = maybeAncestor->child; child; child = child->next) {
+        if (child == item) {
+            return true;
+        }
+
+        if (IsTocItemAncestorOf(child, item)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void ResetTocBookmarkDrag(HWND hwndTree) {
+    if (gTocBookmarkDrag.dragImage) {
+        if (hwndTree) {
+            ImageList_DragLeave(hwndTree);
+        }
+
+        ImageList_EndDrag();
+        ImageList_Destroy(gTocBookmarkDrag.dragImage);
+    }
+
+    if (hwndTree) {
+        TreeView_SelectDropTarget(hwndTree, nullptr);
+    }
+
+    gTocBookmarkDrag = {};
+}
+
+static bool IsPointBelowLastVisibleTreeItem(HWND hwndTree, POINT ptTree) {
+    if (!hwndTree) {
+        return false;
+    }
+
+    HTREEITEM hItem = TreeView_GetRoot(hwndTree);
+    if (!hItem) {
+        return false;
+    }
+
+    HTREEITEM hLast = hItem;
+
+    for (;;) {
+        HTREEITEM hNext = TreeView_GetNextItem(hwndTree, hLast, TVGN_NEXTVISIBLE);
+        if (!hNext) {
+            break;
+        }
+
+        hLast = hNext;
+    }
+
+    RECT rc{};
+    if (!TreeView_GetItemRect(hwndTree, hLast, &rc, FALSE)) {
+        return false;
+    }
+
+    return ptTree.y > rc.bottom;
+}
+
+static TocItem* GetRootTocSiblingList(MainWindow* win) {
+    if (!win) {
+        return nullptr;
+    }
+
+    WindowTab* tab = win->CurrentTab();
+    if (!tab || !tab->currToc || !tab->currToc->root) {
+        return nullptr;
+    }
+
+    return tab->currToc->root->child;
+}
+
+static int GetTocItemIndexInList(TocItem* first, TocItem* item) {
+    if (!first || !item) {
+        return -1;
+    }
+
+    int index = 0;
+    for (TocItem* it = first; it; it = it->next, index++) {
+        if (it == item) {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+static TocItem* GetSiblingListForTocItem(MainWindow* win, TocItem* item) {
+    if (!win || !item) {
+        return nullptr;
+    }
+
+    if (item->parent) {
+        return item->parent->child;
+    }
+
+    return GetRootTocSiblingList(win);
+}
+
+static bool AreTocItemsSameLevel(MainWindow* win, TocItem* a, TocItem* b) {
+    if (!win || !a || !b) {
+        return false;
+    }
+
+    if (a->parent != b->parent) {
+        return false;
+    }
+
+    TocItem* first = GetSiblingListForTocItem(win, a);
+    return GetTocItemIndexInList(first, a) >= 0 && GetTocItemIndexInList(first, b) >= 0;
+}
+
+static bool MovePdfBookmarkByDrop(MainWindow* win, TocItem* source, TocItem* target, TocBookmarkDropMode mode) {
+    if (!win || !source) {
+        return false;
+    }
+
+    if (mode != TocBookmarkDropMode::RootEnd && !target) {
+        return false;
+    }
+
+    if (target && source == target) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        logf("TOC drag move ignored: filter active\n");
+        return false;
+    }
+
+    if (mode == TocBookmarkDropMode::RootEnd) {
+        if (HasTocFilter(win)) {
+            logf("TOC drag root move ignored: filter active\n");
+            return false;
+        }
+
+        DisplayModel* dm = win->AsFixed();
+        EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+
+        PdfBookmarkEditor editor(engine);
+        if (!editor.MoveBookmarkToRootEnd(source)) {
+            logf("TOC drag root move failed: source='%s'\n", source->title ? source->title : "");
+            return false;
+        }
+
+        TreeView* treeView = win->tocTreeView;
+        if (treeView && treeView->hwnd) {
+            TreeModel* model = treeView->treeModel;
+
+            treeView->Clear();
+            treeView->SetTreeModel(model);
+            treeView->SelectItem((TreeItem)source);
+
+            InvalidateRect(treeView->hwnd, nullptr, TRUE);
+        }
+
+        NotifyPdfBookmarksChanged(win);
+
+        logf("TOC drag root move done: source='%s'\n", source->title ? source->title : "");
+        return true;
+    }
+
+    if (mode == TocBookmarkDropMode::AsChild) {
+        DisplayModel* dm = win->AsFixed();
+        EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+
+        PdfBookmarkEditor editor(engine);
+        if (!editor.MoveBookmarkAsChild(source, target)) {
+            logf("TOC drag move as child failed: source='%s', target='%s'\n", source->title ? source->title : "",
+                 target->title ? target->title : "");
+            return false;
+        }
+
+        TreeView* treeView = win->tocTreeView;
+        if (treeView && treeView->hwnd) {
+            TreeModel* model = treeView->treeModel;
+
+            treeView->Clear();
+            treeView->SetTreeModel(model);
+            treeView->SelectItem((TreeItem)source);
+
+            InvalidateRect(treeView->hwnd, nullptr, TRUE);
+        }
+
+        NotifyPdfBookmarksChanged(win);
+
+        logf("TOC drag move as child done: source='%s', target='%s'\n", source->title ? source->title : "",
+             target->title ? target->title : "");
+
+        return true;
+    }
+
+    if (mode != TocBookmarkDropMode::Before && mode != TocBookmarkDropMode::After) {
+        logf("TOC drag move ignored: unsupported mode=%s\n", TocBookmarkDropModeName(mode));
+        return false;
+    }
+
+    if (!AreTocItemsSameLevel(win, source, target)) {
+        logf(
+            "TOC drag move ignored: cross-parent before/after not implemented yet, source='%s', target='%s', mode=%s\n",
+            source->title ? source->title : "", target->title ? target->title : "", TocBookmarkDropModeName(mode));
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+
+    PdfBookmarkEditor editor(engine);
+    if (!editor.CanMoveBookmarks()) {
+        logf("TOC drag move ignored: CanMoveBookmarks=false\n");
+        return false;
+    }
+
+    bool moved = false;
+
+    for (;;) {
+        TocItem* first = GetSiblingListForTocItem(win, source);
+        int sourceIndex = GetTocItemIndexInList(first, source);
+        int targetIndex = GetTocItemIndexInList(first, target);
+
+        if (sourceIndex < 0 || targetIndex < 0) {
+            logf("TOC drag move failed: sourceIndex=%d targetIndex=%d\n", sourceIndex, targetIndex);
+            return false;
+        }
+
+        if (mode == TocBookmarkDropMode::Before) {
+            if (sourceIndex == targetIndex - 1) {
+                break;
+            }
+
+            bool ok = false;
+            if (sourceIndex < targetIndex) {
+                ok = editor.MoveBookmarkDown(source);
+            } else {
+                ok = editor.MoveBookmarkUp(source);
+            }
+
+            if (!ok) {
+                logf("TOC drag move failed: source='%s', target='%s', mode=Before\n",
+                     source->title ? source->title : "", target->title ? target->title : "");
+                return false;
+            }
+
+            moved = true;
+            continue;
+        }
+
+        if (mode == TocBookmarkDropMode::After) {
+            if (sourceIndex == targetIndex + 1) {
+                break;
+            }
+
+            bool ok = false;
+            if (sourceIndex < targetIndex) {
+                ok = editor.MoveBookmarkDown(source);
+            } else {
+                ok = editor.MoveBookmarkUp(source);
+            }
+
+            if (!ok) {
+                logf("TOC drag move failed: source='%s', target='%s', mode=After\n", source->title ? source->title : "",
+                     target->title ? target->title : "");
+                return false;
+            }
+
+            moved = true;
+            continue;
+        }
+
+        break;
+    }
+
+    if (!moved) {
+        logf("TOC drag move no-op: source='%s', target='%s', mode=%s\n", source->title ? source->title : "",
+             target->title ? target->title : "", TocBookmarkDropModeName(mode));
+        return false;
+    }
+
+    TreeView* treeView = win->tocTreeView;
+    if (treeView && treeView->hwnd) {
+        TreeModel* model = treeView->treeModel;
+
+        treeView->Clear();
+        treeView->SetTreeModel(model);
+        treeView->SelectItem((TreeItem)source);
+
+        InvalidateRect(treeView->hwnd, nullptr, TRUE);
+    }
+
+    NotifyPdfBookmarksChanged(win);
+
+    logf("TOC drag move done: source='%s', target='%s', mode=%s\n", source->title ? source->title : "",
+         target->title ? target->title : "", TocBookmarkDropModeName(mode));
+
+    return true;
+}
+
+
+static bool BeginTocBookmarkDrag(MainWindow* win, HWND hwndTocBox, NMTREEVIEWW* ntv) {
+    if (!win || !hwndTocBox || !ntv || !win->tocTreeView || !win->tocTreeView->hwnd) {
+        return false;
+    }
+
+    if (HasTocFilter(win)) {
+        return false;
+    }
+
+    TocItem* item = (TocItem*)ntv->itemNew.lParam;
+    if (!item) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+
+    PdfBookmarkEditor editor(engine);
+    if (!editor.CanEditBookmarks()) {
+        return false;
+    }
+
+    HWND hwndTree = win->tocTreeView->hwnd;
+
+    ResetTocBookmarkDrag(hwndTree);
+
+    gTocBookmarkDrag.active = true;
+    gTocBookmarkDrag.source = item;
+    gTocBookmarkDrag.sourceHItem = ntv->itemNew.hItem;
+    gTocBookmarkDrag.target = nullptr;
+    gTocBookmarkDrag.targetHItem = nullptr;
+    gTocBookmarkDrag.mode = TocBookmarkDropMode::None;
+
+    POINT ptTree{};
+    GetTreeClientPointFromScreen(hwndTree, ntv->ptDrag, &ptTree);
+
+    gTocBookmarkDrag.dragImage = TreeView_CreateDragImage(hwndTree, ntv->itemNew.hItem);
+    if (gTocBookmarkDrag.dragImage) {
+        ImageList_BeginDrag(gTocBookmarkDrag.dragImage, 0, 0, 0);
+        ImageList_DragEnter(hwndTree, ptTree.x, ptTree.y);
+    }
+
+    SetCapture(hwndTocBox);
+
+    logf("TOC drag begin: source='%s' ptTree=(%d,%d)\n", item->title ? item->title : "", ptTree.x, ptTree.y);
+
+    return true;
+}
+
+static void UpdateTocBookmarkDrag(MainWindow* win) {
+    if (!gTocBookmarkDrag.active || !win || !win->tocTreeView || !win->tocTreeView->hwnd) {
+        return;
+    }
+
+    HWND hwndTree = win->tocTreeView->hwnd;
+
+    POINT ptTree{};
+    if (!GetCurrentTreeClientPoint(hwndTree, &ptTree)) {
+        return;
+    }
+
+    if (gTocBookmarkDrag.dragImage) {
+        ImageList_DragMove(ptTree.x, ptTree.y);
+    }
+
+    TVHITTESTINFO hit{};
+    hit.pt = ptTree;
+
+    HTREEITEM hTarget = TreeView_HitTest(hwndTree, &hit);
+    TocItem* target = GetTocItemFromTreeItem(hwndTree, hTarget);
+    TocBookmarkDropMode mode = GetDropModeFromTreePoint(hwndTree, hTarget, ptTree);
+
+    if (!target) {
+        if (IsPointBelowLastVisibleTreeItem(hwndTree, ptTree)) {
+            mode = TocBookmarkDropMode::RootEnd;
+        } else {
+            mode = TocBookmarkDropMode::None;
+        }
+    }
+
+    if (target == gTocBookmarkDrag.source) {
+        mode = TocBookmarkDropMode::None;
+    }
+
+    if (target && IsTocItemAncestorOf(gTocBookmarkDrag.source, target)) {
+        mode = TocBookmarkDropMode::None;
+    }
+
+    gTocBookmarkDrag.target = target;
+    gTocBookmarkDrag.targetHItem = hTarget;
+    gTocBookmarkDrag.mode = mode;
+
+    TreeView_SelectDropTarget(hwndTree, mode == TocBookmarkDropMode::None ? nullptr : hTarget);
+
+    logf("TOC drag update: target='%s' mode=%s ptTree=(%d,%d) hitFlags=0x%x\n",
+         target && target->title ? target->title : "", TocBookmarkDropModeName(mode), ptTree.x, ptTree.y,
+         (unsigned)hit.flags);
+}
+
+static void FinishTocBookmarkDrag(MainWindow* win) {
+    HWND hwndTree = win && win->tocTreeView ? win->tocTreeView->hwnd : nullptr;
+
+    // Recompute target at the final cursor position if your current version has
+    // UpdateTocBookmarkDrag(win). If your current signature still takes hwnd/lp,
+    // skip this line and use the last tracked target.
+    // UpdateTocBookmarkDrag(win);
+
+    TocItem* source = gTocBookmarkDrag.source;
+    TocItem* target = gTocBookmarkDrag.target;
+    TocBookmarkDropMode mode = gTocBookmarkDrag.mode;
+
+    logf("TOC drag end: source='%s' target='%s' mode=%s\n", source && source->title ? source->title : "",
+         target && target->title ? target->title : "", TocBookmarkDropModeName(mode));
+
+    ResetTocBookmarkDrag(hwndTree);
+
+    if (GetCapture()) {
+        ReleaseCapture();
+    }
+
+    if (!source || mode == TocBookmarkDropMode::None) {
+        return;
+    }
+
+    if (!target && mode != TocBookmarkDropMode::RootEnd) {
+        return;
+    }
+
+    MovePdfBookmarkByDrop(win, source, target, mode);
+}
+
+static void CancelTocBookmarkDrag(MainWindow* win) {
+    HWND hwndTree = win && win->tocTreeView ? win->tocTreeView->hwnd : nullptr;
+
+    if (gTocBookmarkDrag.active) {
+        logf("TOC drag cancel\n");
+    }
+
+    ResetTocBookmarkDrag(hwndTree);
+}
+
 static LRESULT CALLBACK WndProcTocBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR subclassId, DWORD_PTR data) {
     MainWindow* win = FindMainWindowByHwnd(hwnd);
     if (!win) {
         return DefSubclassProc(hwnd, msg, wp, lp);
     }
 
-    LRESULT res = 0;
-    res = TryReflectMessages(hwnd, msg, wp, lp);
+    TreeView* treeView = win->tocTreeView;
+
+    if (msg == WM_NOTIFY) {
+        NMHDR* hdr = (NMHDR*)lp;
+
+        if (hdr && treeView && treeView->hwnd && hdr->hwndFrom == treeView->hwnd) {
+            switch (hdr->code) {
+                case TVN_ENDLABELEDITW: {
+                    auto info = (NMTVDISPINFOW*)lp;
+                    return CommitRenameTocBookmark(win, info) ? TRUE : FALSE;
+                }
+
+                case TVN_BEGINDRAGW: {
+                    auto ntv = (NMTREEVIEWW*)lp;
+                    return BeginTocBookmarkDrag(win, hwnd, ntv) ? TRUE : FALSE;
+                }
+            }
+        }
+    }
+
+    if (gTocBookmarkDrag.active) {
+        switch (msg) {
+            case WM_MOUSEMOVE:
+                UpdateTocBookmarkDrag(win);
+                return 0;
+
+            case WM_LBUTTONUP:
+                FinishTocBookmarkDrag(win);
+                return 0;
+
+            case WM_RBUTTONUP:
+            case WM_CANCELMODE:
+                CancelTocBookmarkDrag(win);
+                return 0;
+
+            case WM_CAPTURECHANGED:
+                if ((HWND)lp != hwnd) {
+                    CancelTocBookmarkDrag(win);
+                }
+                return 0;
+
+            case WM_KEYDOWN:
+                if (wp == VK_ESCAPE) {
+                    CancelTocBookmarkDrag(win);
+                    return 0;
+                }
+                break;
+        }
+    }
+
+    LRESULT res = TryReflectMessages(hwnd, msg, wp, lp);
     if (res) {
         return res;
     }
-
-    TreeView* treeView = win->tocTreeView;
 
     switch (msg) {
         case WM_SIZE:
@@ -1105,8 +2420,10 @@ static LRESULT CALLBACK WndProcTocBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
             }
             break;
     }
+
     return DefSubclassProc(hwnd, msg, wp, lp);
 }
+
 
 static void SubclassToc(MainWindow* win) {
     HWND hwndTocBox = win->hwndTocBox;

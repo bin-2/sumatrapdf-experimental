@@ -37,6 +37,7 @@
 #include "Installer.h"
 #include "RegistryPreview.h"
 #include "RegistrySearchFilter.h"
+#include "PdfBookmarkEditor.h"
 
 #include "utils/Log.h"
 
@@ -59,6 +60,15 @@ static i32 gBlacklistCommandsFromPalette[] = {
     CmdExpandAll,   // TODO: figure proper context for it
     CmdCollapseAll, // TODO: figure proper context for it
     CmdMoveFrameFocus,
+
+    CmdPdfRenameBookmark,
+    CmdPdfAddChildBookmark,
+    CmdPdfDeleteBookmark,
+    CmdPdfSetBookmarkDestination,
+    CmdPdfMoveBookmarkUp,
+    CmdPdfMoveBookmarkDown,
+    CmdPdfMoveBookmarkLeft,
+    CmdPdfMoveBookmarkRight,
 
     //CmdFavoriteAdd,
     CmdFavoriteDel,
@@ -268,6 +278,7 @@ struct CommandPaletteBuildCtx {
     bool cursorOnComment = false;
     bool cursorOnImage = false;
     bool hasToc = false;
+    bool canShowToc = false;
     bool allowToggleMenuBar = false;
     bool canCloseOtherTabs = false;
     bool canCloseTabsToRight = false;
@@ -278,6 +289,9 @@ struct CommandPaletteBuildCtx {
     bool isSinglePage = false;
     bool hasDocTabs = false;
     Kind engineKind = nullptr;
+
+    bool canAddPdfBookmark = false;
+    bool hasUnsavedPdfBookmarks = false;
 
     ~CommandPaletteBuildCtx() = default;
 };
@@ -477,8 +491,20 @@ static bool AllowCommand(const CommandPaletteBuildCtx& ctx, i32 cmdId) {
         return false;
     }
     if ((cmdId == CmdToggleBookmarks) || (cmdId == CmdToggleTableOfContents)) {
-        return ctx.hasToc;
+        logf("AllowCommand: cmd=%d hasToc=%d canShowToc=%d\n", cmdId, (int)ctx.hasToc, (int)ctx.canShowToc);
+        return ctx.canShowToc;
     }
+
+    int effectiveCmdId = origCmdId ? origCmdId : cmdId;
+
+    if (effectiveCmdId == CmdPdfAddBookmark) {
+        return ctx.canAddPdfBookmark;
+    }
+
+    if (effectiveCmdId == CmdPdfSaveBookmarks || effectiveCmdId == CmdPdfSaveBookmarksNewFile) {
+        return ctx.hasUnsavedPdfBookmarks;
+    }
+
     return true;
 }
 
@@ -518,8 +544,11 @@ static const char* UpdateCommandNameTemp(MainWindow* win, int cmdId, const char*
         } break;
         case CmdToggleBookmarks:
         case CmdToggleTableOfContents: {
+            logf("Dispatch CmdToggleBookmarks: hasToc=%d canShowToc=%d tocVisibleBefore=%d\n",
+                 (int)(win->ctrl && win->ctrl->HasToc()), (int)CanShowTocBoxForWindow(win), (int)win->tocVisible);
             isToggle = true;
             newIsOn = !win->tocVisible;
+            logf("Dispatch CmdToggleBookmarks done: tocVisibleAfter=%d\n", (int)win->tocVisible);
         } break;
         case CmdTogglePresentationMode: {
             isToggle = true;
@@ -758,8 +787,20 @@ void CommandPaletteWnd::CollectStrings(MainWindow* mainWin) {
     Point cursorPos = HwndGetCursorPos(mainWin->hwndCanvas);
 
     DisplayModel* dm = mainWin->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+
+    if (engine) {
+        PdfBookmarkEditor editor(engine);
+        ctx.canAddPdfBookmark = editor.CanEditBookmarks() && editor.CanAddBookmarks();
+
+        if (!ctx.canShowToc && ctx.isDocLoaded) {
+            ctx.canShowToc = editor.CanEditBookmarks();
+        }
+
+        ctx.hasUnsavedPdfBookmarks = EngineMupdfHasUnsavedPdfBookmarks(engine);
+    }
+
     if (dm) {
-        auto engine = dm->GetEngine();
         ctx.supportsAnnots = EngineSupportsAnnotations(engine);
         ctx.hasUnsavedAnnotations = EngineHasUnsavedAnnotations(engine);
         int pageNoUnderCursor = dm->GetPageNoByPoint(cursorPos);
@@ -785,6 +826,12 @@ void CommandPaletteWnd::CollectStrings(MainWindow* mainWin) {
     }
 
     ctx.hasToc = mainWin->ctrl && mainWin->ctrl->HasToc();
+
+    ctx.canShowToc = ctx.hasToc;
+    if (!ctx.canShowToc && ctx.isDocLoaded) {
+        PdfBookmarkEditor editor(engine);
+        ctx.canShowToc = editor.CanEditBookmarks();
+    }
 
     if (smartTabMode && gGlobalPrefs->tabsMru) {
         CollectTabsMru(mainWin, currTab);

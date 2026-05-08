@@ -4118,7 +4118,7 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, const char* path, const ShowErro
     if (!epdf || !epdf->pdfdoc) {
         return false;
     }
-    if (!EngineMupdfHasUnsavedAnnotations(engine)) {
+    if (!EngineMupdfHasUnsavedPdfChanges(engine)) {
         return false;
     }
 
@@ -4148,7 +4148,7 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, const char* path, const ShowErro
         pdf_save_document(ctx, epdf->pdfdoc, path, &save_opts);
         ok = true;
         auto dur = TimeSinceInMs(timeStart);
-        logf("Saved annotations to '%s' in  %.2f ms, incremental: %d\n", path, dur, save_opts.do_incremental);
+        logf("Saved PDF changes to '%s' in  %.2f ms, incremental: %d\n", path, dur, save_opts.do_incremental);
     }
     fz_catch(ctx) {
         fz_report_error(ctx);
@@ -4163,6 +4163,7 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, const char* path, const ShowErro
     // note: this should be short-lived as we should re-load the file
     if (ok) {
         epdf->modifiedAnnotations = false;
+        epdf->modifiedPdfBookmarks = false;
     }
     return ok;
 }
@@ -4360,6 +4361,18 @@ bool EngineMupdfSupportsAnnotations(EngineBase* engine) {
         return false;
     }
     return (epdf->pdfdoc != nullptr);
+}
+
+bool EngineMupdfHasUnsavedPdfBookmarks(EngineBase* engine) {
+    EngineMupdf* epdf = AsEngineMupdf(engine);
+    if (!epdf || !epdf->pdfdoc) {
+        return false;
+    }
+    return epdf->modifiedPdfBookmarks;
+}
+
+bool EngineMupdfHasUnsavedPdfChanges(EngineBase* engine) {
+    return EngineMupdfHasUnsavedAnnotations(engine) || EngineMupdfHasUnsavedPdfBookmarks(engine);
 }
 
 // caller must free

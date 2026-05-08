@@ -237,6 +237,18 @@ static SeqStrings gCommandNames =
     "CmdSetScreenshotHotkey\0"
     "CmdToggleReuseInstance\0"
     "CmdToggleChmUI\0"
+    "CmdPdfRenameBookmark\0"
+    "CmdPdfAddBookmark\0"
+    "CmdPdfAddChildBookmark\0"
+    "CmdPdfDeleteBookmark\0"
+    "CmdPdfSetBookmarkDestination\0"
+    "CmdPdfMoveBookmarkUp\0"
+    "CmdPdfMoveBookmarkDown\0"
+    "CmdPdfMoveBookmarkLeft\0"
+    "CmdPdfMoveBookmarkRight\0"
+    "CmdPdfSaveBookmarks\0"
+    "CmdPdfSaveBookmarksNewFile\0"
+    "CmdSavePdfChanges\0"
     "CmdNone\0"
     "\0";
 
@@ -464,6 +476,18 @@ static i32 gCommandIds[] = {
     CmdSetScreenshotHotkey,
     CmdToggleReuseInstance,
     CmdToggleChmUI,
+    CmdPdfRenameBookmark,
+    CmdPdfAddBookmark,
+    CmdPdfAddChildBookmark,
+    CmdPdfDeleteBookmark,
+    CmdPdfSetBookmarkDestination,
+    CmdPdfMoveBookmarkUp,
+    CmdPdfMoveBookmarkDown,
+    CmdPdfMoveBookmarkLeft,
+    CmdPdfMoveBookmarkRight,
+    CmdPdfSaveBookmarks,
+    CmdPdfSaveBookmarksNewFile,
+    CmdSavePdfChanges,
     CmdNone,
 };
 
@@ -691,6 +715,18 @@ SeqStrings gCommandDescriptions =
     "Set Screenshot Hotkey\0"
     "Toggle Reuse Instance\0"
     "Toggle CHM UI\0"
+    "Rename PDF Bookmark\0"
+    "Add PDF Bookmark\0"
+    "Add Child PDF Bookmark\0"
+    "Delete PDF Bookmark\0"
+    "Set PDF Bookmark Destination\0"
+    "Move PDF Bookmark Up\0"
+    "Move PDF Bookmark Down\0"
+    "Move PDF Bookmark Left\0"
+    "Move PDF Bookmark Right\0"
+    "Save PDF Bookmarks\0"
+    "Save PDF Bookmarks to New PDF\0"
+    "Save PDF Changes\0"
     "Do nothing\0"
     "\0";
 // clang-format on

@@ -96,6 +96,7 @@
 #include "RegistrySearchFilter.h"
 #include "Theme.h"
 #include "DarkModeSubclass.h"
+#include "PdfBookmarkEditor.h"
 
 #include "utils/Log.h"
 
@@ -2994,9 +2995,20 @@ static void CloseDocumentInCurrentTab(MainWindow* win, bool keepUIEnabled, bool 
     // HwndSetFocus(win->hwndFrame);
 }
 
-static void ShowSavedAnnotationsNotification(HWND hwndParent, const char* path) {
+static void ShowSavedPdfChangesNotification(HWND hwndParent, const char* path, bool savedAnnotations,
+                                            bool savedPdfBookmarks) {
     StrBuilder msg;
-    msg.AppendFmt(_TRA("Saved annotations to '%s'"), path);
+
+    if (savedAnnotations && savedPdfBookmarks) {
+        msg.AppendFmt(_TRA("Saved annotations and bookmarks to '%s'"), path);
+    } else if (savedAnnotations) {
+        msg.AppendFmt(_TRA("Saved annotations to '%s'"), path);
+    } else if (savedPdfBookmarks) {
+        msg.AppendFmt(_TRA("Saved bookmark changes to '%s'"), path);
+    } else {
+        return;
+    }
+
     NotificationCreateArgs nargs;
     nargs.hwndParent = hwndParent;
     nargs.font = GetDefaultGuiFont();
@@ -3005,7 +3017,7 @@ static void ShowSavedAnnotationsNotification(HWND hwndParent, const char* path) 
     ShowNotification(nargs);
 }
 
-static void ShowSavedAnnotationsFailedNotification(HWND hwndParent, const char* path, const char* mupdfErr) {
+static void ShowSavedPdfChangesFailedNotification(HWND hwndParent, const char* path, const char* mupdfErr) {
     StrBuilder msg;
     msg.AppendFmt(_TRA("Saving of '%s' failed with: '%s'"), path, mupdfErr);
     ShowWarningNotification(hwndParent, msg.Get(), 0);
@@ -3016,45 +3028,173 @@ struct ShowErrorData {
     const char* path;
 };
 
-static void ShowSaveAnnotationError(ShowErrorData* d, const char* err) {
+static void ShowSavePdfChangesError(ShowErrorData* d, const char* err) {
     auto tab = d->tab;
     auto path = d->path;
-    ShowSavedAnnotationsFailedNotification(tab->win->hwndCanvas, path, err);
+    ShowSavedPdfChangesFailedNotification(tab->win->hwndCanvas, path, err);
 }
 
-bool SaveAnnotationsToExistingFile(WindowTab* tab) {
+bool SavePdfChangesToExistingFile(WindowTab* tab) {
     if (!tab) {
         return false;
     }
+
     DisplayModel* dm = tab->AsFixed();
     if (!dm) {
         return false;
     }
+
     EngineBase* engine = dm->GetEngine();
     if (!engine) {
         return false;
     }
+
+    bool savedAnnotations = EngineMupdfHasUnsavedAnnotations(engine);
+    bool savedPdfBookmarks = EngineMupdfHasUnsavedPdfBookmarks(engine);
+
+    if (!savedAnnotations && !savedPdfBookmarks) {
+        return true;
+    }
+
     const char* path = engine->FilePath();
+    if (str::IsEmpty(path)) {
+        return false;
+    }
+
     tab->ignoreNextAutoReload = true;
+
     ShowErrorData data{tab, path};
-    auto fn = MkFunc1(ShowSaveAnnotationError, &data);
+    auto fn = MkFunc1(ShowSavePdfChangesError, &data);
+
     bool ok = EngineMupdfSaveUpdated(engine, nullptr, fn);
     if (!ok) {
         tab->ignoreNextAutoReload = false;
         return false;
     }
-    ShowSavedAnnotationsNotification(tab->win->hwndCanvas, path);
 
-    // have to re-open edit annotations window because the current has
-    // a reference to deleted Engine
+    ShowSavedPdfChangesNotification(tab->win->hwndCanvas, path, savedAnnotations, savedPdfBookmarks);
+
     bool hadEditAnnotations = CloseAndDeleteEditAnnotationsWindow(tab);
     ReloadDocument(tab->win, false);
+
     if (hadEditAnnotations) {
-        // TODO: improve by remembering which annotation was selected and restoring it after  we reload
         ShowEditAnnotationsWindow(tab, nullptr);
     }
 
     return true;
+}
+
+bool SavePdfChangesToMaybeNewPdfFile(WindowTab* tab) {
+    if (!tab) {
+        return false;
+    }
+
+    DisplayModel* dm = tab->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    bool savedAnnotations = EngineMupdfHasUnsavedAnnotations(engine);
+    bool savedPdfBookmarks = EngineMupdfHasUnsavedPdfBookmarks(engine);
+
+    if (!savedAnnotations && !savedPdfBookmarks) {
+        return true;
+    }
+
+    WCHAR dstFileName[MAX_PATH + 1]{};
+
+    OPENFILENAME ofn{};
+    StrBuilder fileFilter(256);
+    fileFilter.Append(_TRA("PDF documents"));
+    fileFilter.Append("\1*.pdf\1");
+    fileFilter.Append("\1*.*\1");
+    str::TransCharsInPlace(fileFilter.CStr(), "\1", "\0");
+    TempWStr fileFilterW = ToWStrTemp(fileFilter);
+
+    char* srcFileName = str::Dup(engine->FilePath());
+    if (str::IsEmpty(srcFileName)) {
+        str::Free(srcFileName);
+        return false;
+    }
+
+    str::BufSet(dstFileName, dimof(dstFileName), srcFileName);
+
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = tab->win->hwndFrame;
+    ofn.lpstrFile = dstFileName;
+    ofn.nMaxFile = dimof(dstFileName);
+    ofn.lpstrFilter = fileFilterW;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrDefExt = L".pdf";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+
+    bool ok = GetSaveFileNameW(&ofn);
+    if (!ok) {
+        str::Free(srcFileName);
+        return false;
+    }
+
+    char* dstFilePath = ToUtf8Temp(dstFileName);
+    bool savingToExisting = str::Eq(dstFilePath, srcFileName);
+
+    if (savingToExisting) {
+        str::Free(srcFileName);
+        return SavePdfChangesToExistingFile(tab);
+    }
+
+    ShowErrorData data{tab, dstFilePath};
+    auto fn = MkFunc1(ShowSavePdfChangesError, &data);
+
+    ok = EngineMupdfSaveUpdated(engine, dstFilePath, fn);
+    if (!ok) {
+        str::Free(srcFileName);
+        return false;
+    }
+
+    bool hadEditAnnotations = CloseAndDeleteEditAnnotationsWindow(tab);
+
+    MainWindow* win = tab->win;
+    UpdateTabFileDisplayStateForTab(tab);
+    CloseDocumentInCurrentTab(win, true, true);
+    HwndSetFocus(win->hwndFrame);
+
+    char* newPath = path::NormalizeTemp(dstFilePath);
+
+    RenameFileInHistory(srcFileName, newPath);
+    str::Free(srcFileName);
+
+    LoadArgs args(newPath, win);
+    args.forceReuse = true;
+    LoadDocument(&args);
+
+    ShowSavedPdfChangesNotification(win->hwndCanvas, newPath, savedAnnotations, savedPdfBookmarks);
+
+    if (hadEditAnnotations) {
+        ShowEditAnnotationsWindow(tab, nullptr);
+    }
+
+    return true;
+}
+
+bool SaveAnnotationsToExistingFile(WindowTab* tab) {
+    return SavePdfChangesToExistingFile(tab);
+}
+
+bool SavePdfBookmarksToExistingFile(WindowTab* tab) {
+    return SavePdfChangesToExistingFile(tab);
+}
+
+bool SavePdfBookmarksToMaybeNewPdfFile(WindowTab* tab) {
+    return SavePdfChangesToMaybeNewPdfFile(tab);
+}
+
+bool SaveAnnotationsToMaybeNewPdfFile(WindowTab* tab) {
+    return SavePdfChangesToMaybeNewPdfFile(tab);
 }
 
 static void InvokeInverseSearch(WindowTab* tab) {
@@ -3069,83 +3209,6 @@ static void InvokeInverseSearch(WindowTab* tab) {
     OnInverseSearch(win, pt.x, pt.y);
 }
 
-// returns true if saved successully
-bool SaveAnnotationsToMaybeNewPdfFile(WindowTab* tab) {
-    if (!tab) {
-        return false;
-    }
-    WCHAR dstFileName[MAX_PATH + 1]{};
-
-    OPENFILENAME ofn{};
-    StrBuilder fileFilter(256);
-    fileFilter.Append(_TRA("PDF documents"));
-    fileFilter.Append("\1*.pdf\1");
-    fileFilter.Append("\1*.*\1");
-    str::TransCharsInPlace(fileFilter.CStr(), "\1", "\0");
-    TempWStr fileFilterW = ToWStrTemp(fileFilter);
-
-    // TODO: automatically construct "foo.pdf" => "foo Copy.pdf"
-    EngineBase* engine = tab->AsFixed()->GetEngine();
-    char* srcFileName = str::Dup(engine->FilePath());
-    str::BufSet(dstFileName, dimof(dstFileName), srcFileName);
-
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = tab->win->hwndFrame;
-    ofn.lpstrFile = dstFileName;
-    ofn.nMaxFile = dimof(dstFileName);
-    ofn.lpstrFilter = fileFilterW;
-    ofn.nFilterIndex = 1;
-    // ofn.lpstrTitle = _TRA("Rename To");
-    // ofn.lpstrInitialDir = initDir;
-    ofn.lpstrDefExt = L".pdf";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
-
-    bool ok = GetSaveFileNameW(&ofn);
-    if (!ok) {
-        str::Free(srcFileName);
-        return false;
-    }
-    char* dstFilePath = ToUtf8Temp(dstFileName);
-    bool savingToExisting = str::Eq(dstFilePath, srcFileName);
-    if (savingToExisting) {
-        str::Free(srcFileName);
-        return SaveAnnotationsToExistingFile(tab);
-    }
-
-    ShowErrorData data{tab, dstFilePath};
-    auto fn = MkFunc1(ShowSaveAnnotationError, &data);
-    ok = EngineMupdfSaveUpdated(engine, dstFilePath, fn);
-    if (!ok) {
-        str::Free(srcFileName);
-        return false;
-    }
-
-    // have to re-open edit annotations window because the current has
-    // a reference to deleted Engine
-    bool hadEditAnnotations = CloseAndDeleteEditAnnotationsWindow(tab);
-
-    auto win = tab->win;
-    UpdateTabFileDisplayStateForTab(tab);
-    CloseDocumentInCurrentTab(win, true, true);
-    HwndSetFocus(win->hwndFrame);
-
-    char* newPath = path::NormalizeTemp(dstFilePath);
-    // TODO: this should be 'duplicate FileInHistory"
-    RenameFileInHistory(srcFileName, newPath);
-    str::Free(srcFileName);
-
-    LoadArgs args(newPath, win);
-    args.forceReuse = true;
-    LoadDocument(&args);
-
-    ShowSavedAnnotationsNotification(win->hwndCanvas, newPath);
-    if (hadEditAnnotations) {
-        // TODO: improve by remembering which annotation was selected and restoring it after reload
-        // could do it by index
-        ShowEditAnnotationsWindow(tab, nullptr);
-    }
-    return true;
-}
 
 enum class SaveChoice {
     Discard,
@@ -3156,9 +3219,9 @@ enum class SaveChoice {
 
 SaveChoice ShouldSaveAnnotationsDialog(HWND hwndParent, const char* filePath) {
     TempStr fileName = (TempStr)path::GetBaseNameTemp(filePath);
-    TempStr mainInstrA = str::FormatTemp(_TRA("Unsaved annotations in '%s'"), fileName);
+    TempStr mainInstrA = str::FormatTemp(_TRA("Unsaved PDF changes in '%s'"), fileName);
     TempWStr mainInstr = ToWStrTemp(mainInstrA);
-    auto content = _TRA("Save annotations?");
+    auto content = _TRA("Save changes?");
 
     constexpr int kBtnIdDiscard = 100;
     constexpr int kBtnIdSaveToExisting = 101;
@@ -3186,7 +3249,7 @@ SaveChoice ShouldSaveAnnotationsDialog(HWND hwndParent, const char* filePath) {
         flags |= TDF_RTL_LAYOUT;
     }
     dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    s = _TRA("Unsaved annotations");
+    s = _TRA("Unsaved PDF changes");
     dialogConfig.pszWindowTitle = ToWStrTemp(s);
     dialogConfig.pszMainInstruction = mainInstr;
     dialogConfig.pszContent = ToWStrTemp(content);
@@ -3254,7 +3317,9 @@ static bool MaybeSaveAnnotations(WindowTab* tab) {
         logf("MaybeSaveAnnotations: file '%s' no longer exists, skipping\n", filePath);
         return true;
     }
-    bool shouldConfirm = EngineHasUnsavedAnnotations(engine);
+
+    bool shouldConfirm = EngineMupdfHasUnsavedAnnotations(engine) || EngineMupdfHasUnsavedPdfBookmarks(engine);
+
     if (!shouldConfirm) {
         return true;
     }
@@ -3271,17 +3336,18 @@ static bool MaybeSaveAnnotations(WindowTab* tab) {
         case SaveChoice::Discard:
             return true;
         case SaveChoice::SaveNew: {
-            bool didSave = SaveAnnotationsToMaybeNewPdfFile(tab);
+            bool didSave = SavePdfChangesToMaybeNewPdfFile(tab);
             if (!didSave) {
                 tab->askedToSaveAnnotations = false;
             }
             return didSave;
         }
         case SaveChoice::SaveExisting: {
-            // const char* path = engine->FileName();
-            ShowErrorData data{tab, path};
-            auto fn = MkFunc1(ShowSaveAnnotationError, &data);
-            bool ok = EngineMupdfSaveUpdated(engine, nullptr, fn);
+            bool didSave = SavePdfChangesToExistingFile(tab);
+            if (!didSave) {
+                tab->askedToSaveAnnotations = false;
+            }
+            return didSave;
         } break;
         case SaveChoice::Cancel:
             tab->askedToSaveAnnotations = false;
@@ -3591,8 +3657,9 @@ static void SaveCurrentFileAs(MainWindow* win) {
 
     DisplayModel* dm = win->AsFixed();
     EngineBase* engine = dm ? dm->GetEngine() : nullptr;
-    if (EngineHasUnsavedAnnotations(engine)) {
-        SaveAnnotationsToMaybeNewPdfFile(win->CurrentTab());
+
+    if (EngineMupdfHasUnsavedAnnotations(engine) || EngineMupdfHasUnsavedPdfBookmarks(engine)) {
+        SavePdfChangesToMaybeNewPdfFile(win->CurrentTab());
         return;
     }
 
@@ -5657,12 +5724,39 @@ static void OnFavSplitterMove(Splitter::MoveEvent* ev) {
     RelayoutFrame(win, false, rToc.dx);
 }
 
+static bool CanEditPdfBookmarksForWindow(MainWindow* win) {
+    if (!win || !win->IsDocLoaded()) {
+        return false;
+    }
+
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return false;
+    }
+
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) {
+        return false;
+    }
+
+    PdfBookmarkEditor editor(engine);
+    return editor.CanEditBookmarks();
+}
+
+bool CanShowTocBoxForWindow(MainWindow* win) {
+    if (!win || !win->IsDocLoaded() || !win->ctrl) {
+        return false;
+    }
+
+    return win->ctrl->HasToc() || CanEditPdfBookmarksForWindow(win);
+}
+
 void SetSidebarVisibility(MainWindow* win, bool tocVisible, bool showFavorites, bool relayout) {
     if (gPluginMode || !CanAccessDisk()) {
         showFavorites = false;
     }
 
-    if (!win->IsDocLoaded() || !win->ctrl->HasToc()) {
+    if (!CanShowTocBoxForWindow(win)) {
         tocVisible = false;
     }
 
@@ -6809,7 +6903,12 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdSaveAnnotations: {
-            SaveAnnotationsToExistingFile(tab);
+            SavePdfChangesToExistingFile(tab);
+            break;
+        }
+
+        case CmdSavePdfChanges: {
+            SavePdfChangesToExistingFile(tab);
             break;
         }
 
@@ -6825,7 +6924,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdSaveAnnotationsNewFile: {
-            SaveAnnotationsToMaybeNewPdfFile(tab);
+            SavePdfChangesToMaybeNewPdfFile(tab);
             break;
         }
 
@@ -7387,6 +7486,15 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdFavoriteAdd:
             AddFavoriteForCurrentPage(win);
             break;
+
+        case CmdPdfAddBookmark: {
+            logf("CmdPdfAddBookmark: FrameOnCommand dispatch\n");
+
+            bool ok = AddPdfBookmarkForCurrentPageAndShowToc(win);
+
+            logf("CmdPdfAddBookmark: AddPdfBookmarkForCurrentPageAndShowToc returned %d\n", (int)ok);
+            return 0;
+        }
 
         case CmdFavoriteDel:
             if (win->IsDocLoaded()) {

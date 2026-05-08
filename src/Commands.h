@@ -232,7 +232,21 @@ enum {
     CmdSetScreenshotHotkey = 421,
     CmdToggleReuseInstance = 422,
     CmdToggleChmUI = 423,
-    CmdNone = 424,
+
+    CmdPdfRenameBookmark = 424,
+    CmdPdfAddBookmark = 425,
+    CmdPdfAddChildBookmark = 426,
+    CmdPdfDeleteBookmark = 427,
+    CmdPdfSetBookmarkDestination = 428,
+    CmdPdfMoveBookmarkUp = 429,
+    CmdPdfMoveBookmarkDown = 430,
+    CmdPdfMoveBookmarkLeft = 431,
+    CmdPdfMoveBookmarkRight = 432,
+    CmdPdfSaveBookmarks = 433,
+    CmdPdfSaveBookmarksNewFile = 434,
+    CmdSavePdfChanges = 435,
+
+    CmdNone = 436,
 
     /* range for file history */
     CmdFileHistoryFirst,
@@ -254,6 +268,9 @@ enum {
 
     CmdCreateAnnotFirst = CmdCreateAnnotText,
     CmdCreateAnnotLast = CmdCreateAnnotFileAttachment,
+
+    CmdPdfBookmarkFirst = CmdPdfRenameBookmark,
+    CmdPdfBookmarkLast = CmdPdfSaveBookmarksNewFile,
 };
 // clang-format on
 // @gen-end cmd-enum

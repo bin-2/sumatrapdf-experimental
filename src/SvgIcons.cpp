@@ -154,9 +154,9 @@ static const char* gIconBook =
     R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
   <rect x="0" y="0" width="24" height="24" stroke="none"></rect>
   <rect x="3" y="3" width="18" height="18" rx="2" />
-  <line x1="12" y1="3" x2="12" y2="21" />
-  <line x1="7" y1="6" x2="10" y2="6" />
-  <line x1="14" y1="6" x2="17" y2="6" />
+  <line x1="12" y1="4" x2="12" y2="20" />
+  <line x1="7" y1="8" x2="10" y2="8" />
+  <line x1="14" y1="8" x2="17" y2="8" />
 </svg>)";
 
 static const char* gIconAnnotEdit =

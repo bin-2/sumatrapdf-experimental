@@ -65,13 +65,19 @@ struct ToolbarButtonInfo {
 constexpr int PageInfoId = (int)CmdLast + 16;
 constexpr int WarningMsgId = (int)CmdLast + 17;
 
+bool EngineMupdfHasUnsavedPdfBookmarks(EngineBase*);
+bool EngineMupdfHasUnsavedPdfChanges(EngineBase*);
+
+static bool HasUnsavedPdfChanges(MainWindow* win);
+
 static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Open, CmdOpenFile, _TRN("Open")},
+    {TbIcon::Save, CmdSavePdfChanges, _TRN("Save PDF Changes")},
     {TbIcon::Print, CmdPrint, _TRN("Print")},
     {TbIcon::None, PageInfoId, nullptr}, // text box for page number + show current page / no of pages
     {TbIcon::PagePrev, CmdGoToPrevPage, _TRN("Previous Page")},
     {TbIcon::PageNext, CmdGoToNextPage, _TRN("Next Page")},
-    {TbIcon::Save, CmdSaveAnnotations, _TRN("Save Annotations")},
+    {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::AnnotEdit, CmdEditAnnotations, _TRN("Edit Annotations")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::LayoutContinuous, CmdZoomFitWidthAndContinuous, _TRN("Fit Width and Show Pages Continuously")},
@@ -170,7 +176,7 @@ static bool NeedsRotateUI(MainWindow* win) {
 // we remove toolbar buttons for un-availalbe commands
 static bool IsCmdAvailable(MainWindow* win, int cmdId) {
     switch (cmdId) {
-        case CmdSaveAnnotations:
+        case CmdSavePdfChanges:
         case CmdEditAnnotations:
             return true;
 
@@ -228,6 +234,10 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
     // If no file open, only enable open button
     if (!win->IsDocLoaded()) {
         return CmdOpenFile == cmdId;
+    }
+
+    if (cmdId == CmdSavePdfChanges) {
+        return HasUnsavedPdfChanges(win);
     }
 
     switch (cmdId) {
@@ -326,8 +336,8 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow* win) {
 #endif
 }
 
-// Toolbar: UnsavedAnnotations STATE CHANGE
-static bool HasUnsavedAnnotations(MainWindow* win) {
+// Toolbar: unsaved PDF changes state
+static bool HasUnsavedPdfChanges(MainWindow* win) {
     if (!win) {
         return false;
     }
@@ -337,8 +347,9 @@ static bool HasUnsavedAnnotations(MainWindow* win) {
         return false;
     }
 
-    return EngineHasUnsavedAnnotations(tab->AsFixed()->GetEngine());
+    return EngineMupdfHasUnsavedPdfChanges(tab->AsFixed()->GetEngine());
 }
+
 static void SetToolbarButtonImageByIdx(HWND hwnd, int idx, TbIcon icon) {
     TBBUTTONINFOW bi{};
     bi.cbSize = sizeof(bi);
@@ -366,8 +377,8 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
         bool isEnabled = IsCmdEnabled(win, cmdId);
         UpdateToolbarButtonStateByIdx(hwnd, i, isEnabled, TBSTATE_ENABLED);
 
-        if (cmdId == CmdSaveAnnotations) {
-            bool dirty = HasUnsavedAnnotations(win);
+        if (cmdId == CmdSavePdfChanges) {
+            bool dirty = HasUnsavedPdfChanges(win);
             SetToolbarButtonImageByIdx(hwnd, i, dirty ? TbIcon::SaveDirty : TbIcon::Save);
         }
     }
@@ -378,26 +389,45 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
         UpdateToolbarFindText(win);
     }
 
-    // update dirty (unsaved annotations) flag and tooltip on each tab
+    // update dirty flag and tooltip on each tab
     if (win->tabsCtrl) {
         int nTabs = win->TabCount();
         for (int i = 0; i < nTabs; i++) {
             WindowTab* tab = win->GetTab(i);
-            bool dirty = false;
+
+            bool hasUnsavedAnnotations = false;
+            bool hasUnsavedPdfBookmarks = false;
+
             if (tab && tab->AsFixed()) {
-                dirty = EngineHasUnsavedAnnotations(tab->AsFixed()->GetEngine());
+                EngineBase* engine = tab->AsFixed()->GetEngine();
+                hasUnsavedAnnotations = EngineMupdfHasUnsavedAnnotations(engine);
+                hasUnsavedPdfBookmarks = EngineMupdfHasUnsavedPdfBookmarks(engine);
             }
-            // update tooltip before SetTabDirty (which rebuilds tooltips via LayoutTabs)
+
+            bool dirty = hasUnsavedAnnotations || hasUnsavedPdfBookmarks;
+
+            // update tooltip before SetTabDirty, which rebuilds tooltips via LayoutTabs
             TabInfo* ti = win->tabsCtrl->GetTab(i);
             if (ti && tab && tab->filePath) {
                 const char* path = tab->filePath;
-                if (dirty) {
-                    TempStr tooltip = str::JoinTemp(path, " ", _TRA("(unsaved annotations)"));
+                const char* suffix = nullptr;
+
+                if (hasUnsavedAnnotations && hasUnsavedPdfBookmarks) {
+                    suffix = _TRA("(unsaved annotations and bookmarks)");
+                } else if (hasUnsavedAnnotations) {
+                    suffix = _TRA("(unsaved annotations)");
+                } else if (hasUnsavedPdfBookmarks) {
+                    suffix = _TRA("(unsaved bookmarks)");
+                }
+
+                if (suffix) {
+                    TempStr tooltip = str::JoinTemp(path, " ", suffix);
                     str::ReplaceWithCopy(&ti->tooltip, tooltip);
                 } else {
                     str::ReplaceWithCopy(&ti->tooltip, path);
                 }
             }
+
             win->tabsCtrl->SetTabDirty(i, dirty);
         }
     }
