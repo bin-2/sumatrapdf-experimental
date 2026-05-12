@@ -23,6 +23,9 @@ enum class TbIcon {
     RotateRight,
     Book,
     AnnotEdit,
+    Bookmarks,
+    Speak,
+    StopSpeaking,
     kMax
 };
 

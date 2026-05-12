@@ -245,8 +245,10 @@ enum {
     CmdPdfSaveBookmarks = 433,
     CmdPdfSaveBookmarksNewFile = 434,
     CmdSavePdfChanges = 435,
+    CmdReadAloud = 436,
+    CmdStopReadAloud = 437,
 
-    CmdNone = 436,
+    CmdNone = 438,
 
     /* range for file history */
     CmdFileHistoryFirst,

@@ -1518,8 +1518,8 @@ std::pair<bool, bool> GetCommandIdState(BuildMenuCtx* ctx, int cmdId) {
     }
 
     if ((cmdId == CmdToggleBookmarks) || (cmdId == CmdToggleTableOfContents)) {
-        logf("GetCommandIdState: cmd=%d hasToc=%d canShowToc=%d remove=%d disable=%d\n", cmdId, (int)ctx->hasToc,
-             (int)ctx->canShowToc, (int)remove, (int)disable);
+        //logf("GetCommandIdState: cmd=%d hasToc=%d canShowToc=%d remove=%d disable=%d\n", cmdId, (int)ctx->hasToc,
+        //     (int)ctx->canShowToc, (int)remove, (int)disable);
 
         disable |= !ctx->canShowToc;
     }
