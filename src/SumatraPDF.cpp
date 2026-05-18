@@ -511,6 +511,8 @@ MainWindow* FindMainWindowBySyncFile(const char* path, bool focusTab) {
     return nullptr;
 }
 
+bool gShowPassword = false;
+
 class HwndPasswordUI : public PasswordUI {
     HWND hwnd;
     size_t pwdIdx;
@@ -570,7 +572,7 @@ char* HwndPasswordUI::GetPassword(const char* path, u8* fileDigest, u8 decryptio
     HwndToForeground(hwnd);
 
     bool* rememberPwd = SettingsRememberOpenedFiles() ? saveKey : nullptr;
-    return Dialog_GetPassword(hwnd, path, rememberPwd);
+    return Dialog_GetPassword(hwnd, path, rememberPwd, &gShowPassword);
 }
 
 // update global windowState for next default launch when either
@@ -1624,6 +1626,60 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     }
 }
 
+// Suppress auto-reload events caused by PDF save operation.
+// This avoids a manual reload and a delayed file-watcher reload racing each other.
+
+static constexpr DWORD kOwnPdfSaveReloadSuppressMs = 3000;
+
+static DWORD gOwnPdfSaveReloadSuppressTick = 0;
+static char* gOwnPdfSaveReloadSuppressPath = nullptr;
+
+static void ClearOwnPdfSaveAutoReloadSuppression(WindowTab* tab) {
+    if (tab) {
+        tab->ignoreNextAutoReload = false;
+    }
+
+    free(gOwnPdfSaveReloadSuppressPath);
+    gOwnPdfSaveReloadSuppressPath = nullptr;
+    gOwnPdfSaveReloadSuppressTick = 0;
+}
+
+static void ArmOwnPdfSaveAutoReloadSuppression(WindowTab* tab, const char* path) {
+    if (!tab || str::IsEmpty(path)) {
+        return;
+    }
+
+    tab->ignoreNextAutoReload = true;
+    gOwnPdfSaveReloadSuppressTick = GetTickCount64();
+
+    free(gOwnPdfSaveReloadSuppressPath);
+    gOwnPdfSaveReloadSuppressPath = str::Dup(path);
+}
+
+static bool ShouldSuppressOwnPdfSaveAutoReload(WindowTab* tab, const char* where) {
+    if (!tab || !tab->ignoreNextAutoReload) {
+        return false;
+    }
+
+    const char* tabPath = tab->filePath;
+    DWORD elapsedMs = GetTickCount64() - gOwnPdfSaveReloadSuppressTick;
+
+    bool samePath =
+        gOwnPdfSaveReloadSuppressPath && !str::IsEmpty(tabPath) && str::EqI(gOwnPdfSaveReloadSuppressPath, tabPath);
+
+    if (!samePath || elapsedMs > kOwnPdfSaveReloadSuppressMs) {
+        ClearOwnPdfSaveAutoReloadSuppression(tab);
+        return false;
+    }
+
+    tab->reloadOnFocus = false;
+
+    logfa("Suppressing auto-reload caused by own PDF save: where=%s, path='%s', elapsed=%lu ms\n", where ? where : "",
+          tabPath, elapsedMs);
+
+    return true;
+}
+
 void ReloadDocument(MainWindow* win, bool autoRefresh) {
     WindowTab* tab = win->CurrentTab();
 
@@ -1636,11 +1692,14 @@ void ReloadDocument(MainWindow* win, bool autoRefresh) {
         return;
     }
 
+    if (autoRefresh && ShouldSuppressOwnPdfSaveAutoReload(tab, "ReloadDocument")) {
+        return;
+    }
+
     tab->selectedAnnotation = nullptr;
     win->annotationBeingDragged = nullptr;
     win->annotationBeingResized = false;
     win->annotationUnderCursor = nullptr;
-    tab->ignoreNextAutoReload = false;
 
     if (!tab->IsDocLoaded()) {
         if (!autoRefresh) {
@@ -2155,6 +2214,11 @@ static void ReloadTab(WindowTab* tab) {
     if (win == nullptr) {
         return;
     }
+
+    if (ShouldSuppressOwnPdfSaveAutoReload(tab, "ReloadTab")) {
+        return;
+    }
+
     tab->reloadOnFocus = true;
     if (tab == win->CurrentTab()) {
         // delay the reload slightly, in case we get another request immediately after this one
@@ -2458,7 +2522,7 @@ static void OnExtractProgress(ExtractProgressState* s, ArchiveExtractProgress* p
     // so the final count is displayed; intermediate callbacks post at
     // most once every 100 ms.
     bool isFinal = (p->nTotal > 0 && p->nDecoded == p->nTotal);
-    DWORD now = GetTickCount();
+    DWORD now = GetTickCount64();
     if (!isFinal && (now - s->lastUpdate) < 100) {
         return;
     }
@@ -2529,7 +2593,7 @@ static void LoadDocumentAsync(LoadDocumentAsyncData* d) {
     // wire up the archive extraction progress callback so eager-load
     // archives (small cbx / epub / fb2z) can update the "Loading ..."
     // notification.
-    ExtractProgressState progState;
+    ExtractProgressState progState{};
     progState.wnd = d->wndNotif;
     progState.path = path;
     progState.lastUpdate = 0;
@@ -2538,7 +2602,7 @@ static void LoadDocumentAsync(LoadDocumentAsyncData* d) {
     // also wire up the file-copy progress callback so the cbx
     // network-drive caching step (runs before archive open) reports bytes
     // copied into the same loading notification.
-    CopyProgressState copyState;
+    CopyProgressState copyState{};
     copyState.wnd = d->wndNotif;
     copyState.path = path;
     file::gFileCopyProgressCb = MkFunc1<CopyProgressState, file::CopyProgress*>(OnFileCopyProgress, &copyState);
@@ -2932,7 +2996,7 @@ static void CloseDocumentInCurrentTab(MainWindow* win, bool keepUIEnabled, bool 
     ClearTocBox(win);
     AbortFinding(win, true);
 
-    win->linkOnLastButtonDown = nullptr;
+    ClearMouseState(win);
     win->annotationUnderCursor = nullptr;
     win->annotationBeingDragged = nullptr;
     win->annotationBeingResized = false;
@@ -3068,14 +3132,14 @@ bool SavePdfChangesToExistingFile(WindowTab* tab) {
         return false;
     }
 
-    tab->ignoreNextAutoReload = true;
+    ArmOwnPdfSaveAutoReloadSuppression(tab, path);
 
     ShowErrorData data{tab, path};
     auto fn = MkFunc1(ShowSavePdfChangesError, &data);
 
     bool ok = EngineMupdfSaveUpdated(engine, nullptr, fn);
     if (!ok) {
-        tab->ignoreNextAutoReload = false;
+        ClearOwnPdfSaveAutoReloadSuppression(tab);
         return false;
     }
 
@@ -3235,7 +3299,7 @@ SaveChoice ShouldSaveAnnotationsDialog(HWND hwndParent, const char* filePath) {
     constexpr int kBtnIdSaveToNew = 102;
     // constexpr int kBtnIdCancel = 103;
     TASKDIALOGCONFIG dialogConfig{};
-    TASKDIALOG_BUTTON buttons[4];
+    TASKDIALOG_BUTTON buttons[4]{};
 
     buttons[0].nButtonID = kBtnIdSaveToExisting;
     auto s = _TRA("&Save to existing PDF");
@@ -8045,7 +8109,7 @@ void RelayoutCaption(MainWindow* win) {
         if (win->hwndMenuToolbar) {
             int btnCount = (int)SendMessageW(win->hwndMenuToolbar, TB_BUTTONCOUNT, 0, 0);
             if (btnCount > 0) {
-                RECT lastBtn;
+                RECT lastBtn{};
                 SendMessageW(win->hwndMenuToolbar, TB_GETITEMRECT, btnCount - 1, (LPARAM)&lastBtn);
                 int naturalWidth = lastBtn.right + GetSystemMetrics(SM_CXBORDER) * 2;
                 if (naturalWidth < row1Dx) {

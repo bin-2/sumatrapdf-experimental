@@ -54,9 +54,7 @@ You can [toggle toolbar](CmdToggleToolbar) with (Key/CmdToggleToolbar).
 You can [edit PDF annotations](Help/Editing-annotations).
 )";
 
-constexpr const char* sumatraPromos = R"(Try [Edna](https://edna.arslexis.io): a note taking web app for power users.
-Try [MarkLexis](https://marklexis.arslexis.io): a bookmarking web application.
-)";
+constexpr const char* sumatraPromos = "";
 
 // TODO: leaks if set
 const char* promoFromServer = nullptr;
@@ -281,7 +279,7 @@ static int ParseTipsFromString(const char* src, const char* prefix, ParsedTip*& 
 static void PickRandomTipOrPromo() {
     bool pickPromo = (gParsedPromoCount > 0) && (rand() % 100 < 30);
     if (pickPromo) {
-        gSelectedIsPromo = true;
+        gSelectedIsPromo = false;
         gSelectedTipIdx = rand() % gParsedPromoCount;
     } else if (gParsedTipCount > 0) {
         gSelectedIsPromo = false;
@@ -366,8 +364,7 @@ static AboutLayoutInfoEl gAboutLayoutInfo[] = {
 static Vec<StaticLink*> gStaticLinks;
 
 void SetPromoString(const char* s) {
-    if (!s) return;
-    str::ReplaceWithCopy(&promoFromServer, s);
+    (void)s;
 }
 
 static TempStr GetAppVersionTemp() {
