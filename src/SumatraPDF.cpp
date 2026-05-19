@@ -7682,13 +7682,17 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdNavigateBack:
+            logf("CmdNavigateBack: ctrl=%p\n", ctrl);
             if (ctrl) {
+                logf("CmdNavigateBack: CanNavigate(-1)=%d\n", (int)ctrl->CanNavigate(-1));
                 ctrl->Navigate(-1);
             }
             break;
 
         case CmdNavigateForward:
+            logf("CmdNavigateForward: ctrl=%p\n", ctrl);
             if (ctrl) {
+                logf("CmdNavigateForward: CanNavigate(1)=%d\n", (int)ctrl->CanNavigate(1));
                 ctrl->Navigate(1);
             }
             break;

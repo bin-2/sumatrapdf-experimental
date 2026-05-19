@@ -26,6 +26,8 @@ enum class TbIcon {
     Bookmarks,
     Speak,
     StopSpeaking,
+    NavigateBack,
+    NavigateForward,
     kMax
 };
 

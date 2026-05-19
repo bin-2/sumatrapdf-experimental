@@ -75,9 +75,13 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Open, CmdOpenFile, _TRN("Open")},
     {TbIcon::Save, CmdSavePdfChanges, _TRN("Save PDF Changes")},
     {TbIcon::Print, CmdPrint, _TRN("Print")},
+    //
     {TbIcon::None, PageInfoId, nullptr}, // text box for page number + show current page / no of pages
     {TbIcon::PagePrev, CmdGoToPrevPage, _TRN("Previous Page")},
     {TbIcon::PageNext, CmdGoToNextPage, _TRN("Next Page")},
+    {TbIcon::None, 0, nullptr}, // separator
+    {TbIcon::NavigateBack, CmdNavigateBack, _TRN("Back")},
+    {TbIcon::NavigateForward, CmdNavigateForward, _TRN("Forward")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::Bookmarks, CmdToggleBookmarks, _TRN("Toggle Bookmarks")},
     {TbIcon::AnnotEdit, CmdEditAnnotations, _TRN("Edit Annotations")},
