@@ -369,12 +369,6 @@
     <ClInclude Include="..\src\wingui\WinGui.h">
       <Filter>src\wingui</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\PdfBookmarkEditor.h">
-      <Filter>src</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\TextToSpeech.h">
-      <Filter>src</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\ext\darkmodelib\src\DarkModeSubclass.cpp">
@@ -806,12 +800,6 @@
     <ClCompile Include="..\src\wingui\Wnd.cpp">
       <Filter>src\wingui</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\PdfBookmarkEditor.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\TextToSpeech.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\.clang-format" />
@@ -825,8 +813,8 @@
       <Filter>.github\workflows</Filter>
     </None>
     <None Include="..\.gitignore" />
-    <None Include="..\Claude.md" />
     <None Include="..\SECURITY.md" />
+    <None Include="..\agents.md" />
     <None Include="..\cmd\build-all.ts">
       <Filter>cmd</Filter>
     </None>

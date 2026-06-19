@@ -426,7 +426,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -465,7 +465,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -504,7 +504,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\arm64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -543,7 +543,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -582,7 +582,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -621,7 +621,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -660,7 +660,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\arm64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -699,7 +699,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -743,7 +743,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -787,7 +787,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -831,7 +831,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\arm64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -874,7 +874,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -919,7 +919,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x86;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -964,7 +964,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -1009,7 +1009,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\arm64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -1053,7 +1053,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.992.28\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -1116,7 +1116,6 @@
     <ClInclude Include="..\src\Notifications.h" />
     <ClInclude Include="..\src\OverlayScrollbar.h" />
     <ClInclude Include="..\src\PalmDbReader.h" />
-    <ClInclude Include="..\src\PdfBookmarkEditor.h" />
     <ClInclude Include="..\src\PdfCreator.h" />
     <ClInclude Include="..\src\PdfSync.h" />
     <ClInclude Include="..\src\PdfTools.h" />
@@ -1141,7 +1140,6 @@
     <ClInclude Include="..\src\Tabs.h" />
     <ClInclude Include="..\src\TextSearch.h" />
     <ClInclude Include="..\src\TextSelection.h" />
-    <ClInclude Include="..\src\TextToSpeech.h" />
     <ClInclude Include="..\src\Theme.h" />
     <ClInclude Include="..\src\Toolbar.h" />
     <ClInclude Include="..\src\Translations.h" />
@@ -1225,7 +1223,6 @@
     <ClCompile Include="..\src\Notifications.cpp" />
     <ClCompile Include="..\src\OverlayScrollbar.cpp" />
     <ClCompile Include="..\src\PalmDbReader.cpp" />
-    <ClCompile Include="..\src\PdfBookmarkEditor.cpp" />
     <ClCompile Include="..\src\PdfCreator.cpp" />
     <ClCompile Include="..\src\PdfSync.cpp" />
     <ClCompile Include="..\src\PdfTools.cpp" />
@@ -1282,7 +1279,6 @@
     <ClCompile Include="..\src\Tests.cpp" />
     <ClCompile Include="..\src\TextSearch.cpp" />
     <ClCompile Include="..\src\TextSelection.cpp" />
-    <ClCompile Include="..\src\TextToSpeech.cpp" />
     <ClCompile Include="..\src\Theme.cpp" />
     <ClCompile Include="..\src\Toolbar.cpp" />
     <ClCompile Include="..\src\TranslationLangs.cpp" />
@@ -1565,8 +1561,8 @@
     <None Include="..\.github\workflows\codeql.yml" />
     <None Include="..\.github\workflows\daily.yml" />
     <None Include="..\.gitignore" />
-    <None Include="..\Claude.md" />
     <None Include="..\SECURITY.md" />
+    <None Include="..\agents.md" />
     <None Include="..\cmd\build-all.ts" />
     <None Include="..\cmd\build-ci-daily.ts" />
     <None Include="..\cmd\build-ci.ts" />
