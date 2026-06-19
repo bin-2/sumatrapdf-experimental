@@ -1386,6 +1386,9 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     if (!win) {
         return;
     }
+    if (!IsMainWindowValid(win) || win->isBeingClosed) {
+        return;
+    }
     WindowTab* tab = win->CurrentTab();
     ReportIf(!tab);
 
@@ -1588,6 +1591,10 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     // has not been determined yet
     // cf. https://code.google.com/p/sumatrapdf/issues/detail?id=2541
     // ReportIf(win->IsDocLoaded() && args->showWin && win->canvasRc.IsEmpty() && !win->AsChm());
+
+    if (!IsMainWindowValid(win) || win->isBeingClosed) {
+        return;
+    }
 
     SetSidebarVisibility(win, showToc, gGlobalPrefs->showFavorites);
     // restore scroll state after the canvas size has been restored
@@ -2294,6 +2301,14 @@ void ShowErrorLoadingNotification(MainWindow* win, const char* path, bool noSave
 
 extern void SetTabState(WindowTab* tab, TabState* state);
 
+// we call this via uitask::Post so that SaveSettings() doesn't run
+// synchronously in the middle of LoadDocumentFinish while other
+// documents may still be loading or tabs are being closed
+// (fixes crashes with dangling tab->ctrl under rapid DDE opens + hooks)
+static void SaveSettingsVoid() {
+    SaveSettings();
+}
+
 MainWindow* LoadDocumentFinish(LoadArgs* args) {
     MainWindow* win = args->win;
     const char* fullPath = args->FilePath();
@@ -2323,6 +2338,10 @@ MainWindow* LoadDocumentFinish(LoadArgs* args) {
         tab->SetFilePath(fullPath);
         win->currentTabTemp = AddTabToWindow(win, tab);
 
+        if (!IsMainWindowValid(win) || win->isBeingClosed) {
+            return nullptr;
+        }
+
         // logf("LoadDocument: !forceReuse, created win->CurrentTab() at 0x%p\n", win->CurrentTab());
     } else {
         win->CurrentTab()->SetFilePath(fullPath);
@@ -2336,7 +2355,14 @@ MainWindow* LoadDocumentFinish(LoadArgs* args) {
     args->placeWindow = !SettingsUseTabs();
     bool lazyLoad = args->lazyLoad;
     if (!lazyLoad) {
+        if (!IsMainWindowValid(win) || win->isBeingClosed) {
+            return nullptr;
+        }
         ReplaceDocumentInCurrentTab(args, args->ctrl, nullptr);
+    }
+
+    if (!IsMainWindowValid(win) || win->isBeingClosed) {
+        return nullptr;
     }
 
     if (gPluginMode) {
@@ -2388,7 +2414,8 @@ MainWindow* LoadDocumentFinish(LoadArgs* args) {
         // TODO: this seems to save the state of file that we just opened
         // add a way to skip saving currTab?
         if (!args->noSavePrefs) {
-            SaveSettings();
+            auto fn = MkFunc0Void(SaveSettingsVoid);
+            uitask::Post(fn, "SaveSettingsAfterDocLoad");
         }
     }
 
@@ -4200,7 +4227,7 @@ static TempWStr GetFileFilterTemp() {
         const char* filter;
         bool available;
     } fileFormats[] = {
-        {_TRA("PDF documents"), "*.pdf", true},
+        {_TRA("PDF documents"), "*.pdf;*.p7m", true},
         {_TRA("XPS documents"), "*.xps;*.oxps", true},
         {_TRA("DjVu documents"), "*.djvu", true},
         {_TRA("Postscript documents"), "*.ps;*.eps", IsEnginePsAvailable()},
