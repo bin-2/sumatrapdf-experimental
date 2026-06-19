@@ -238,13 +238,20 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
         return false;
     }
 
-    // If no file open, only enable open button
+    // if no file is open, only enable buttons for commands that don't require a document
+    // (custom toolbar buttons use a custom command id, the original command decides)
+    // https://github.com/sumatrapdfreader/sumatrapdf/issues/5657
     if (!win->IsDocLoaded()) {
         return CmdOpenFile == cmdId;
     }
 
     if (cmdId == CmdSavePdfChanges) {
-        return HasUnsavedPdfChanges(win);
+        int realCmdId = cmdId;
+        auto cmd = FindCustomCommand(cmdId);
+        if (cmd) {
+            realCmdId = cmd->origId;
+        }
+        return !CmdRequiresDocument(realCmdId);
     }
 
     switch (cmdId) {
