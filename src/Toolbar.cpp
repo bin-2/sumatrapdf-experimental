@@ -21,6 +21,7 @@ extern "C" {
 #include "EngineBase.h"
 #include "EngineAll.h"
 #include "DisplayModel.h"
+#include "DisplayMode.h"
 #include "FzImgReader.h"
 #include "GlobalPrefs.h"
 #include "ProgressUpdateUI.h"
@@ -807,9 +808,10 @@ void UpdateToolbarState(MainWindow* win) {
     if (!win->IsDocLoaded()) {
         return;
     }
-    HWND hwnd = win->hwndToolbar;
+
     DisplayMode dm = win->ctrl->GetDisplayMode();
     float zoomVirtual = win->ctrl->GetZoomVirtual();
+
     {
         bool isChecked = dm == DisplayMode::Continuous && zoomVirtual == kZoomFitWidth;
         SetToolbarButtonCheckedState(win, CmdZoomFitWidthAndContinuous, isChecked);
@@ -820,6 +822,10 @@ void UpdateToolbarState(MainWindow* win) {
         if (!isChecked) {
             win->CurrentTab()->prevZoomVirtual = kInvalidZoom;
         }
+    }
+    {
+        bool isChecked = IsFacing(dm);
+        SetToolbarButtonCheckedState(win, CmdFacingView, isChecked);
     }
 }
 

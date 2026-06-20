@@ -150,6 +150,7 @@ static const char* gIconRotateRight =
   <circle cx="11" cy="19.94" r="0.15"/>
 </svg>)";
 
+/*
 static const char* gIconBook =
     R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
   <rect x="0" y="0" width="24" height="24" stroke="none"></rect>
@@ -157,6 +158,18 @@ static const char* gIconBook =
   <line x1="12" y1="4" x2="12" y2="20" />
   <line x1="7" y1="8" x2="10" y2="8" />
   <line x1="14" y1="8" x2="17" y2="8" />
+</svg>)";
+*/
+
+static const char* gIconBook =
+    R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+
+  <path d="M9.5 4v3a.75 .75 0 0 0 .75 .75h3" />
+  <path d="M12 20h-6.5a1.5 1.5 0 0 1 -1.5 -1.5v-13a1.5 1.5 0 0 1 1.5 -1.5h4l4 4v10.5a1.5 1.5 0 0 1 -1.5 1.5" />
+
+  <path d="M18.5 4v3a.75 .75 0 0 0 .75 .75h3" />
+  <path d="M21 20h-6.5a1.5 1.5 0 0 1 -1.5 -1.5v-13a1.5 1.5 0 0 1 1.5 -1.5h4l4 4v10.5a1.5 1.5 0 0 1 -1.5 1.5" />
 </svg>)";
 
 static const char* gIconAnnotEdit =
